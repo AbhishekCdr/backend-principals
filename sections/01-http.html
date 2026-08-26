@@ -1,0 +1,1381 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Understanding HTTP &middot; Backend Principles</title>
+<meta name="description" content="Notes on HTTP for backend engineers: statelessness, the client-server model, headers, methods, CORS, status codes, caching, content negotiation and TLS.">
+<script>
+  /* set theme before first paint to avoid a flash of the wrong colours */
+  (function () {
+    try {
+      var s = localStorage.getItem('bp-theme');
+      var t = s || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+
+<header class="topbar">
+  <button class="icon-btn hamburger" id="hamburger" aria-label="Toggle navigation" aria-expanded="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ notes</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="nav-scrim" id="nav-scrim"></div>
+
+<div class="shell">
+
+  <aside class="sidebar" id="sidebar">
+    <p class="sidebar-title">Lessons</p>
+    <ul class="nav-list" id="nav-list"></ul>
+    <div class="sidebar-note">
+      <strong>How to read these.</strong> Every lesson ends each major part with a
+      <em>Key takeaways</em> box. If you are revising, read only those first, then dive
+      back into whatever felt shaky.
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 01</p>
+      <h1>Understanding HTTP</h1>
+      <p class="lead">
+        Backend is enormous. If we tried to cover every component that could possibly be part of it
+        we would be here for years. So we deliberately cover only what shows up in the
+        <strong>overwhelming majority of codebases</strong> &mdash; and nothing shows up more often
+        than HTTP: the medium through which browsers talk to servers.
+      </p>
+      <div class="pills">
+        <span class="pill">statelessness</span>
+        <span class="pill">client&ndash;server</span>
+        <span class="pill">headers</span>
+        <span class="pill">methods</span>
+        <span class="pill">CORS</span>
+        <span class="pill">status codes</span>
+        <span class="pill">caching</span>
+        <span class="pill">compression</span>
+        <span class="pill">TLS</span>
+      </div>
+    </header>
+
+    <div class="prose">
+
+      <div class="callout callout--key">
+        <div class="callout-label">The scoping rule for this whole course</div>
+        <p>
+          There are many protocols clients and servers use to talk to each other. HTTP is one of the
+          most used, so it is the one we go deep on. Everything else you can pick up later, on the job.
+          Throughout, treat <strong>HTTP and HTTPS as interchangeable</strong> &mdash; HTTPS is, to
+          oversimplify, a more secure HTTP. The underlying principles are identical; the extra parts
+          (encryption, certificates, TLS) belong more to network engineering than to us.
+        </p>
+      </div>
+
+      <h2>The two ideas at the heart of HTTP</h2>
+      <p>
+        Almost everything else in this lesson falls out of two design decisions. Learn these two and
+        the rest stops feeling like trivia.
+      </p>
+
+      <h3>1. Statelessness</h3>
+      <p>
+        Statelessness means HTTP has <strong>no memory of past interactions</strong>. Each request
+        carries all the information the server needs to process it &mdash; the method, the URL, the
+        headers, the body. After the server responds, it forgets the request happened. If the client
+        makes another request, the server treats it as a brand new, unrelated event.
+      </p>
+      <p>
+        The direct consequence is <strong>self-contained requests</strong>. Because the server does not
+        remember anything, every request must include whatever it needs: authentication tokens, session
+        identifiers, preferences. Fetching a user profile means sending credentials &mdash; a cookie or
+        a token &mdash; <em>on every single request</em>, so the server can work out which user is asking.
+      </p>
+
+      <h4>Why anyone would design it this way</h4>
+      <div class="cards">
+        <div class="card">
+          <div class="card-kicker">Benefit 01</div>
+          <h4>Simplicity</h4>
+          <p>
+            The server does not need to store session information, which would otherwise cost
+            resources and add complexity to its architecture.
+          </p>
+        </div>
+        <div class="card">
+          <div class="card-kicker">Benefit 02</div>
+          <h4>Scalability</h4>
+          <p>
+            Requests can be distributed across many servers, because no single server needs to be
+            the one that remembers you. Any instance can answer any request.
+          </p>
+        </div>
+        <div class="card">
+          <div class="card-kicker">Benefit 03</div>
+          <h4>Crash resilience</h4>
+          <p>
+            If a server crashes it does not damage the client's state &mdash; there is no session in
+            memory that needs restoring, because there was never a session in memory.
+          </p>
+        </div>
+      </div>
+
+      <div class="callout callout--note">
+        <div class="callout-label">The catch</div>
+        <p>
+          Real applications <em>do</em> need continuity &mdash; logins, shopping carts. So because HTTP
+          is stateless, developers layer state management on top of it: cookies, sessions, tokens.
+          That is not HTTP being fixed; that is HTTP being extended. We cover exactly how in
+          <a href="04-auth.html">Lesson 04</a>.
+        </p>
+      </div>
+
+      <h3>2. The client&ndash;server model</h3>
+      <p>
+        In every HTTP exchange there is a client and there is a server, always.
+      </p>
+      <ul>
+        <li>
+          The <strong>client</strong> &mdash; typically a browser or an application &mdash; initiates
+          the communication by sending a request. It is responsible for supplying everything the
+          server needs: the URL of the resource, the headers, the body.
+        </li>
+        <li>
+          The <strong>server</strong> hosts resources (web pages, APIs, files) and waits for incoming
+          requests. When one arrives it processes it and sends back an appropriate response: a page,
+          JSON, plain text, an error &mdash; any kind of content.
+        </li>
+      </ul>
+      <div class="callout callout--tip">
+        <div class="callout-label">The rule to remember</div>
+        <p>
+          The HTTP protocol states that <strong>communication is always initiated by the client</strong>,
+          in order to get some response from the server. A server cannot spontaneously start an HTTP
+          conversation with you.
+        </p>
+      </div>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>Stateless: every request is self-contained and the server forgets it afterwards.</li>
+          <li>That buys simplicity, horizontal scalability and crash resilience.</li>
+          <li>Continuity (login, cart) is added <em>on top</em> via cookies, sessions and tokens.</li>
+          <li>The client always speaks first.</li>
+        </ul>
+      </div>
+
+      <h2>What HTTP actually runs on</h2>
+      <p>
+        Before anything can be sent, the client and server need a connection &mdash; some medium for
+        the conversation. HTTP itself does not insist that the underlying transport be
+        connection-based. It only requires that the transport be <strong>reliable</strong>: it must not
+        silently lose messages, and at minimum must surface an error when it does.
+      </p>
+      <p>
+        Of the two dominant transport protocols on the internet, TCP and UDP, TCP is the reliable one.
+        So HTTP relies on TCP, which is connection-based. TCP in turn establishes that connection with
+        a three-way handshake &mdash; worth looking up once, but not worth a detour here.
+      </p>
+
+      <div class="callout callout--note">
+        <div class="callout-label">Where we live in the OSI model</div>
+        <p>
+          The OSI model is the usual reference when talking about sending data over a network. As
+          backend engineers we work almost entirely at <strong>Layer 7, the application layer</strong>.
+          TCP handshakes and TLS encryption border on the layers below &mdash; genuinely good to know
+          about, but a rabbit hole. We will stay at the application layer and keep only a rough sketch
+          of what happens beneath it.
+        </p>
+      </div>
+
+      <h3>The versions, and what each one changed</h3>
+      <p>
+        Over the years HTTP kept redefining how clients and servers send and receive data.
+      </p>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr><th>Version</th><th>What changed</th><th>Why it mattered</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="nowrap"><strong>HTTP/1.0</strong></td>
+              <td>Each request opened a new connection.</td>
+              <td>Inefficient &mdash; a connection had to be established and closed for every single
+                  request/response pair, which slowed everything down.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>HTTP/1.1</strong></td>
+              <td><strong>Persistent connections</strong> (multiple requests and responses over the
+                  same TCP connection), chunked transfer encoding, better caching.</td>
+              <td>Significant performance win. Still the most widely used version.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>HTTP/2</strong></td>
+              <td><strong>Multiplexing</strong> &mdash; many requests/responses over one connection.
+                  Binary framing instead of text, header compression (HPACK), server push.</td>
+              <td>Servers can send resources before the client asks. Head-of-line blocking still
+                  exists at the transport level.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>HTTP/3</strong></td>
+              <td>Built on <strong>QUIC</strong>, a transport protocol over UDP rather than TCP.</td>
+              <td>Faster connection establishment, lower latency, better packet-loss handling, and
+                  multiplexing <em>without</em> head-of-line blocking.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--tip">
+        <div class="callout-label">All you actually need to carry forward</div>
+        <p>
+          Client and server establish some kind of network connection, and messages are sent and
+          received over it. That is the whole prerequisite for everything that follows.
+        </p>
+      </div>
+
+      <h2>Anatomy of an HTTP message</h2>
+      <p>
+        A <strong>request message</strong> is what the client sends. A <strong>response message</strong>
+        is what the client receives back. Here are deliberately over-specified examples so we can
+        name every part.
+      </p>
+
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span> Request message
+          <span class="msg-note">client &rarr; server</span></div>
+<pre><code><span class="m">POST</span> <span class="u">/api/v1/notes</span> <span class="v">HTTP/1.1</span>   <span class="c">&larr; method, resource URL, version</span>
+<span class="hk">Host</span>: <span class="hv">api.example.com</span>         <span class="c">&larr; the domain being addressed</span>
+<span class="hk">Origin</span>: <span class="hv">https://example.com</span>
+<span class="hk">User-Agent</span>: <span class="hv">Mozilla/5.0</span>
+<span class="hk">Content-Type</span>: <span class="hv">application/json</span>
+<span class="hk">Content-Length</span>: <span class="hv">54</span>
+<span class="hk">Authorization</span>: <span class="hv">Bearer eyJhbGciOi...</span>
+<span class="hk">Accept</span>: <span class="hv">application/json</span>
+<span class="hk">Accept-Encoding</span>: <span class="hv">gzip, deflate, br</span>
+                              <span class="c">&larr; blank line: headers end, body begins</span>
+{ <span class="key">"title"</span>: <span class="str">"Read about HTTP"</span>, <span class="key">"pinned"</span>: <span class="num">true</span> }</code></pre>
+      </div>
+
+      <div class="msg">
+        <div class="msg-head"><span class="dot dot--res"></span> Response message
+          <span class="msg-note">server &rarr; client</span></div>
+<pre><code><span class="v">HTTP/1.1</span> <span class="s2">201 Created</span>   <span class="c">&larr; version, status code, reason phrase</span>
+<span class="hk">Content-Type</span>: <span class="hv">application/json</span>
+<span class="hk">Content-Length</span>: <span class="hv">96</span>
+<span class="hk">Cache-Control</span>: <span class="hv">no-store</span>
+<span class="hk">ETag</span>: <span class="hv">"3141"</span>
+<span class="hk">Access-Control-Allow-Origin</span>: <span class="hv">https://example.com</span>
+<span class="hk">Strict-Transport-Security</span>: <span class="hv">max-age=31536000</span>
+                       <span class="c">&larr; blank line again</span>
+{ <span class="key">"id"</span>: <span class="num">42</span>, <span class="key">"title"</span>: <span class="str">"Read about HTTP"</span>, <span class="key">"pinned"</span>: <span class="num">true</span> }</code></pre>
+      </div>
+
+      <p>So the parts, named:</p>
+      <ul class="tight">
+        <li><strong>Request method</strong> &mdash; the intent (<code>POST</code>).</li>
+        <li><strong>Resource URL</strong> &mdash; what we are asking for (<code>/api/v1/notes</code>).</li>
+        <li><strong>HTTP version</strong> &mdash; here <code>HTTP/1.1</code>, currently the most used.</li>
+        <li><strong>Host</strong> &mdash; the domain we are addressing.</li>
+        <li><strong>Headers</strong> &mdash; everything else in that block; the bulk of the message.</li>
+        <li><strong>A blank line</strong> &mdash; signals the headers are over and the body starts.</li>
+        <li><strong>Body</strong> &mdash; the payload the client wants to send, or the server returns.</li>
+        <li>On the response side, a <strong>status code and reason phrase</strong> replace the
+            method/URL line: <code>200</code> means OK.</li>
+      </ul>
+
+      <h2>HTTP headers</h2>
+      <p>
+        Headers are the major part of both requests and responses, so they deserve the most attention.
+        At the simplest level: <strong>headers are key&ndash;value pairs</strong> of parameters sent
+        with a request or returned with a response.
+      </p>
+
+      <h3>Why headers exist at all</h3>
+      <p>
+        A fair question: why not put all of this in the URL, or in the request body? Why invent a
+        separate section just for metadata about the request?
+      </p>
+      <div class="callout callout--key">
+        <div class="callout-label">The parcel analogy</div>
+        <p>
+          When you send a parcel, where do you write the recipient's address, phone number, state and
+          PIN code &mdash; inside the package, or on top of it? On top. Because the people carrying it
+          from sender to receiver need that information to route it correctly, and if it were sealed
+          inside they would have to open the parcel to read it. Every time. For every handler.
+        </p>
+        <p>
+          Headers are the writing on the outside of the parcel: metadata that anyone along the path can
+          read cheaply without touching the contents. They just happen to do a lot more than an address
+          label does.
+        </p>
+      </div>
+
+      <h3>The four categories of header</h3>
+      <p>There are a great many headers. They group cleanly into four buckets.</p>
+
+      <div class="cards cards--2">
+        <div class="card">
+          <div class="card-kicker">Category 01</div>
+          <h4>Request headers</h4>
+          <p>Sent by the client, describing the request itself.</p>
+          <ul>
+            <li><code>User-Agent</code> &mdash; what kind of client this is: a browser, Postman, a
+                server, a mobile app.</li>
+            <li><code>Authorization</code> &mdash; credentials such as a bearer token, so the server can
+                identify the user.</li>
+            <li><code>Accept</code> &mdash; what content the client expects back: JSON, text, HTML.</li>
+          </ul>
+          <p><strong>Purpose:</strong> help the server understand the client's environment,
+             preferences and capabilities.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-kicker">Category 02</div>
+          <h4>General headers</h4>
+          <p>Used in both requests and responses; metadata about the message.</p>
+          <ul>
+            <li><code>Date</code> &mdash; when the message was produced.</li>
+            <li><code>Cache-Control</code> &mdash; caching directives such as <code>no-cache</code> or
+                <code>max-age</code>.</li>
+            <li><code>Connection</code> &mdash; whether to <code>keep-alive</code> or
+                <code>close</code>.</li>
+          </ul>
+          <p><strong>Purpose:</strong> carry information about the message itself, in either direction.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-kicker">Category 03</div>
+          <h4>Representation headers</h4>
+          <p>Describe how the resource being transmitted is represented.</p>
+          <ul>
+            <li><code>Content-Type</code> &mdash; the media type: JSON, HTML, XML.</li>
+            <li><code>Content-Length</code> &mdash; size of the resource in bytes.</li>
+            <li><code>Content-Encoding</code> &mdash; any encoding applied, e.g. gzip or deflate.</li>
+            <li><code>ETag</code> &mdash; a unique identifier for the resource, mostly used in caching.</li>
+          </ul>
+          <p><strong>Purpose:</strong> make sure both sides know how to interpret the body.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-kicker">Category 04</div>
+          <h4>Security headers</h4>
+          <p>Control browser behaviour to harden the exchange.</p>
+          <ul>
+            <li><code>Strict-Transport-Security</code> (HSTS) &mdash; only ever talk to this server over
+                HTTPS; prevents protocol-downgrade attacks.</li>
+            <li><code>Content-Security-Policy</code> &mdash; restricts where JS, CSS and images may load
+                from; mitigates XSS.</li>
+            <li><code>X-Frame-Options</code> &mdash; prevents the page being embedded in an iframe;
+                mitigates clickjacking.</li>
+            <li><code>X-Content-Type-Options</code> &mdash; stops the browser guessing the MIME type;
+                prevents MIME sniffing.</li>
+            <li><code>Set-Cookie</code> with <code>HttpOnly</code> / <code>Secure</code> &mdash; makes
+                cookies unreadable by JavaScript and HTTPS-only.</li>
+          </ul>
+          <p><strong>Purpose:</strong> protect both sides by constraining how the browser handles
+             resources and by enforcing policy.</p>
+        </div>
+      </div>
+
+      <h3>Two big ideas that headers unlock</h3>
+
+      <h4>Extensibility</h4>
+      <p>
+        HTTP is highly extensible precisely because headers can be added or customised
+        <strong>without altering the protocol</strong>. Add a piece of metadata and the whole shape of
+        the interaction can change. That is how HTTP keeps adapting to new technologies:
+      </p>
+      <ul class="tight">
+        <li><strong>Security enhancements</strong> &mdash; headers like
+            <code>Strict-Transport-Security</code> force secure connections.</li>
+        <li><strong>Custom headers</strong> &mdash; you can invent <code>X-Custom-Header</code> for
+            your own application's needs.</li>
+        <li><strong>Content negotiation</strong> &mdash; <code>Accept</code>,
+            <code>Accept-Language</code> and <code>Accept-Encoding</code> let one server serve
+            different versions of the same content.</li>
+      </ul>
+
+      <h4>Headers as a remote control</h4>
+      <p>
+        Think of headers as a remote control the client points at the server. They send instructions
+        and preferences that influence how the server responds:
+      </p>
+      <ul class="tight">
+        <li><strong>Content negotiation</strong> &mdash; the client says <code>Accept: text/html</code>
+            and gets HTML; it says <code>Accept: application/json</code> and gets JSON.</li>
+        <li><strong>Caching and expiry</strong> &mdash; the server uses <code>Cache-Control</code> or
+            <code>Expires</code> to dictate how long the client may reuse a resource.</li>
+        <li><strong>Authentication</strong> &mdash; the client authenticates through
+            <code>Authorization</code>, which drives access-control decisions.</li>
+      </ul>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>Headers are key&ndash;value metadata, written on the outside of the parcel.</li>
+          <li>Four buckets: request, general, representation, security.</li>
+          <li>They make HTTP extensible without changing HTTP.</li>
+          <li>They act as a remote control &mdash; the client shapes the server's behaviour with them.</li>
+        </ul>
+      </div>
+
+      <h2>HTTP methods</h2>
+      <p>
+        Methods exist so that different kinds of action can be expressed. Instead of every request
+        meaning the same thing, the method declares the <strong>intent</strong> of the interaction.
+        That is the keyword: intent. It gives each request clear semantic meaning &mdash; and the
+        semantics are intuitive.
+      </p>
+
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr><th>Method</th><th>Intent</th><th>Body?</th><th>Idempotent</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="chip chip--get">GET</span></td>
+              <td>Fetch data from the server. Should <strong>not modify anything</strong>.</td>
+              <td>No</td>
+              <td><span class="chip chip--yes">yes</span></td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--post">POST</span></td>
+              <td>Create data on the server. Has a body &mdash; which makes sense, since that is how
+                  you send the new record.</td>
+              <td>Yes</td>
+              <td><span class="chip chip--no">no</span></td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--patch">PATCH</span></td>
+              <td>Update <em>part</em> of a resource &mdash; an append or selective replacement.
+                  E.g. a user changing just their name.</td>
+              <td>Yes</td>
+              <td><span class="chip chip--yes">yes</span></td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--put">PUT</span></td>
+              <td>Update by <strong>complete replacement</strong> &mdash; whatever is in the body
+                  entirely replaces the previous instance.</td>
+              <td>Yes</td>
+              <td><span class="chip chip--yes">yes</span></td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--delete">DELETE</span></td>
+              <td>Remove a resource from the server.</td>
+              <td>Usually no</td>
+              <td><span class="chip chip--yes">yes</span></td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--options">OPTIONS</span></td>
+              <td>Ask the server what it supports for a cross-origin request. You will rarely write
+                  one yourself; you will see them in the network tab as preflight requests.</td>
+              <td>No</td>
+              <td><span class="chip chip--yes">yes</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--warn">
+        <div class="callout-label">PUT vs PATCH &mdash; the rule of thumb</div>
+        <p>
+          <code>PATCH</code> is an append or selective replacement; <code>PUT</code> is a complete
+          replacement. Plenty of developers reach for <code>PUT</code> when they mean
+          <code>PATCH</code> and quietly break the semantics. <strong>Default to
+          <code>PATCH</code></strong> unless you have a specific reason to fully replace the resource.
+        </p>
+      </div>
+
+      <h3>Idempotency</h3>
+      <p>
+        An <strong>idempotent</strong> method can be called many times and produce the same result.
+        Reason it out per method rather than memorising the list:
+      </p>
+      <ul>
+        <li>
+          <strong><code>GET</code></strong> &mdash; it does not matter how many times you fetch
+          something, the data is the same and you have not modified the server. Obviously idempotent.
+        </li>
+        <li>
+          <strong><code>PUT</code></strong> &mdash; it completely replaces the resource, so replacing
+          old data with the same new data five times lands you in exactly the same place. Idempotent.
+        </li>
+        <li>
+          <strong><code>DELETE</code></strong> &mdash; a resource can only be deleted once. After that
+          it is already gone; repeating the call cannot produce a different outcome. Idempotent.
+        </li>
+        <li>
+          <strong><code>POST</code></strong> &mdash; <em>not</em> idempotent. A user creates a note: the
+          first request creates one note; the second identical request creates a second note. Same
+          request, different results.
+        </li>
+      </ul>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>The method expresses <em>intent</em>, and the intent is part of the contract.</li>
+          <li>Idempotent: <code>GET</code>, <code>PUT</code>, <code>DELETE</code>. Not:
+              <code>POST</code>.</li>
+          <li>Prefer <code>PATCH</code> over <code>PUT</code> unless you truly mean full replacement.</li>
+        </ul>
+      </div>
+
+      <h2>CORS and the same-origin policy</h2>
+      <p>
+        The <code>OPTIONS</code> method has one particularly interesting use, and it lives inside the
+        CORS flow. To understand CORS we start with the rule it exists to relax.
+      </p>
+      <p>
+        By default, browsers enforce the <strong>same-origin policy</strong>: a web page may not make
+        requests to an origin different from the one that served it. <strong>CORS</strong>
+        (Cross-Origin Resource Sharing) is the security mechanism, enforced by browsers, that controls
+        how a web app may interact with resources on a different origin. Without it, a page on
+        <code>example.com</code> simply could not call <code>api.example.com</code>. CORS lets the
+        <em>server</em> specify who may access its resources, and how.
+      </p>
+
+      <div class="callout callout--note">
+        <div class="callout-label">What counts as a different origin</div>
+        <p>
+          Scheme, host <em>and port</em> all matter. In the demo, the front end runs on
+          <code>localhost:5173</code> and the API on <code>localhost:3000</code>. Same host, different
+          port &mdash; so the browser treats it as cross-origin, and the whole CORS machinery kicks in.
+        </p>
+      </div>
+
+      <p>There are two flows. Which one you get depends on the request.</p>
+
+      <h3>Flow A &mdash; the simple request</h3>
+      <p>
+        Front end at <code>example.com</code>, server at <code>api.example.com</code>, and we make a
+        <code>GET</code>.
+      </p>
+      <ol class="flow">
+        <li>
+          <span class="flow-actor">Browser</span>
+          <span class="flow-title">Adds the <code>Origin</code> header automatically</span>
+          <p>The client sends the request; the browser attaches <code>Origin</code> to declare where
+             the request came from. The method is a simple one &mdash; <code>GET</code>,
+             <code>POST</code> or <code>HEAD</code>.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Server</span>
+          <span class="flow-title">Checks <code>Origin</code> against its CORS policy</span>
+          <p>If the origin is allowed, the server includes
+             <code>Access-Control-Allow-Origin</code> in its response.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Server</span>
+          <span class="flow-title">Responds with the resource plus the CORS header</span>
+          <p>The body is the actual data; the header is what makes it usable.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Browser</span>
+          <span class="flow-title">Inspects the response before handing it over</span>
+          <p>It sees that <code>example.com</code> differs from <code>api.example.com</code>, so it
+             looks for <code>Access-Control-Allow-Origin</code>. If the value is the client's own
+             origin &mdash; or <code>*</code>, meaning allow all &mdash; the response is passed
+             through to the JavaScript that asked for it.</p>
+        </li>
+      </ol>
+
+      <div class="msg">
+        <div class="msg-head"><span class="dot dot--res"></span> Response &mdash; allowed
+          <span class="msg-note">browser lets this through</span></div>
+<pre><code><span class="v">HTTP/1.1</span> <span class="s2">200 OK</span>
+<span class="hk">Content-Type</span>: <span class="hv">application/json</span>
+<span class="hl"><span class="hk">Access-Control-Allow-Origin</span>: <span class="hv">https://example.com</span></span>
+
+{ <span class="key">"data"</span>: [ ... ] }</code></pre>
+      </div>
+
+      <h4>And when the header is missing</h4>
+      <p>
+        Now suppose the server does not add the CORS header &mdash; either because it was never
+        configured, or because it does not allow this particular origin. It simply omits
+        <code>Access-Control-Allow-Origin</code>.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot dot--res"></span> Response &mdash; blocked
+          <span class="msg-note">browser refuses to pass this on</span></div>
+<pre><code><span class="v">HTTP/1.1</span> <span class="s2">200 OK</span>
+<span class="hk">Content-Type</span>: <span class="hv">application/json</span>
+   <span class="c">&larr; no Access-Control-Allow-Origin</span>
+
+{ <span class="key">"data"</span>: [ ... ] }</code></pre>
+      </div>
+      <div class="callout callout--warn">
+        <div class="callout-label">Read this carefully</div>
+        <p>
+          The request <em>succeeded</em>. The server ran the handler and returned <code>200</code> with
+          real data. The <strong>browser</strong> then noticed the missing header and blocked the
+          response from reaching your JavaScript &mdash; you get a CORS error in the console and a CORS
+          failure in the network tab. CORS is a browser-enforced policy, not a server-side firewall.
+        </p>
+      </div>
+
+      <h3>Flow B &mdash; the preflighted request</h3>
+      <p>
+        How does the browser decide it needs to ask permission <em>before</em> sending the real
+        request? First the request must be cross-origin. Then <strong>any one</strong> of these three
+        conditions is enough:
+      </p>
+      <div class="cards">
+        <div class="card">
+          <div class="card-kicker">Trigger 01</div>
+          <h4>Non-simple method</h4>
+          <p>The method is not <code>GET</code>, <code>POST</code> or <code>HEAD</code> &mdash; e.g.
+             a <code>PUT</code> or a <code>DELETE</code>.</p>
+        </div>
+        <div class="card">
+          <div class="card-kicker">Trigger 02</div>
+          <h4>Non-simple headers</h4>
+          <p>Anything beyond the ordinary general/request headers &mdash; an
+             <code>Authorization</code> header, or any custom header.</p>
+        </div>
+        <div class="card">
+          <div class="card-kicker">Trigger 03</div>
+          <h4>Non-simple content type</h4>
+          <p>A <code>Content-Type</code> other than
+             <code>application/x-www-form-urlencoded</code>, <code>multipart/form-data</code> or
+             <code>text/plain</code>.</p>
+        </div>
+      </div>
+
+      <div class="callout callout--key">
+        <div class="callout-label">Which means, in practice&hellip;</div>
+        <p>
+          Almost all of our traffic is JSON &mdash; <code>Content-Type: application/json</code> trips
+          trigger 03 all by itself. So <strong>most real cross-origin requests are preflighted</strong>.
+        </p>
+      </div>
+
+      <p>Here is what the browser sends first. Note: <code>OPTIONS</code>, and no body at all.</p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span> Preflight request
+          <span class="msg-note">a general enquiry, not the real request</span></div>
+<pre><code><span class="m">OPTIONS</span> <span class="u">/api/v1/notes/42</span> <span class="v">HTTP/1.1</span>
+<span class="hk">Host</span>: <span class="hv">api.example.com</span>
+<span class="hk">Origin</span>: <span class="hv">https://example.com</span>
+<span class="hl"><span class="hk">Access-Control-Request-Method</span>: <span class="hv">PUT</span></span>
+<span class="hl"><span class="hk">Access-Control-Request-Headers</span>: <span class="hv">authorization, content-type</span></span></code></pre>
+      </div>
+      <p>
+        In plain words: <em>&ldquo;I am about to make a cross-origin request. Do you support
+        <code>PUT</code> on this route? And will you accept these two headers?&rdquo;</em>
+      </p>
+
+      <p>
+        If the server handles CORS properly, it answers. If it does not, the browser blocks everything
+        and the real request is never sent.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot dot--res"></span> Preflight response
+          <span class="msg-note">no body &mdash; the headers are the answer</span></div>
+<pre><code><span class="v">HTTP/1.1</span> <span class="s2">204 No Content</span>
+<span class="hk">Access-Control-Allow-Origin</span>: <span class="hv">https://example.com</span>
+<span class="hk">Access-Control-Allow-Methods</span>: <span class="hv">GET, POST, PUT, DELETE</span>
+<span class="hk">Access-Control-Allow-Headers</span>: <span class="hv">content-type, authorization</span>
+<span class="hk">Access-Control-Max-Age</span>: <span class="hv">86400</span>
+<span class="hk">Content-Length</span>: <span class="hv">0</span></code></pre>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Response header</th><th>What the server is saying</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="nowrap"><code>Access-Control-Allow-Origin</code></td>
+              <td>&ldquo;Yes, I allow this client's origin.&rdquo; May also be <code>*</code>, meaning
+                  any client may call me. This is the condition the browser checks first.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><code>Access-Control-Allow-Methods</code></td>
+              <td>&ldquo;These are the methods I support on this route.&rdquo; The browser ticks off
+                  the <code>PUT</code> it asked about.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><code>Access-Control-Allow-Headers</code></td>
+              <td>&ldquo;These non-simple headers are permitted.&rdquo; Answers the
+                  <code>Access-Control-Request-Headers</code> question.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><code>Access-Control-Max-Age</code></td>
+              <td>&ldquo;Do not preflight me again for this long.&rdquo; With
+                  <code>86400</code> the answers hold for 24 hours, so the browser stops asking on
+                  every route &mdash; saving bandwidth for both sides.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <ol class="flow">
+        <li>
+          <span class="flow-actor">Browser</span>
+          <span class="flow-title">Sends the <code>OPTIONS</code> preflight</span>
+          <p>No request body. Purely an enquiry about the server's capabilities.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Server</span>
+          <span class="flow-title">Replies <code>204 No Content</code> with the four CORS headers</span>
+          <p><code>204</code> is the right code precisely because there is nothing to return but
+             headers.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Browser</span>
+          <span class="flow-title">Ticks off every condition</span>
+          <p>Origin allowed, method allowed, headers allowed. If any check fails, it stops here.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Browser</span>
+          <span class="flow-title">Sends the original request</span>
+          <p>The real <code>PUT</code>, with its <code>Authorization</code> header and JSON body. The
+             server responds normally, and the response comes back to your code.</p>
+        </li>
+      </ol>
+
+      <div class="callout callout--tip">
+        <div class="callout-label">In the network tab</div>
+        <p>
+          You will see the <code>OPTIONS</code> request appear immediately <em>before</em> the real one.
+          During development, setting <code>Access-Control-Max-Age: 0</code> is handy &mdash; otherwise
+          the answer is cached and you stop seeing the preflight you are trying to debug.
+        </p>
+      </div>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>Same-origin policy is the default; CORS is how a server opts into being called across
+              origins.</li>
+          <li>CORS is enforced by the <strong>browser</strong>. Your server still ran the handler.</li>
+          <li>Simple flow: one request, checked for <code>Access-Control-Allow-Origin</code>.</li>
+          <li>Preflight flow: an <code>OPTIONS</code> enquiry first, triggered by a non-simple method,
+              header or content type &mdash; JSON alone is enough.</li>
+          <li><code>Access-Control-Max-Age</code> stops the browser asking again for a while.</li>
+        </ul>
+      </div>
+
+      <h2>Status codes</h2>
+      <p>
+        That <code>200 OK</code> in the response line exists to communicate the outcome of a request
+        <strong>in a standardised way</strong>. You can look at the code alone and know whether the
+        request succeeded, without inspecting the body and without guessing from its shape.
+      </p>
+      <p>
+        Before status codes, clients had to infer the outcome from the content of the response &mdash;
+        &ldquo;if it worked I'd expect this structure; if it failed, that structure; if the server
+        crashed, probably a null object.&rdquo; Codes remove that guesswork and give clients something
+        to branch on: <code>401</code> means log the user out and ask them to sign in again;
+        <code>400</code> means show the form again with a correction.
+      </p>
+      <div class="callout callout--note">
+        <div class="callout-label">Standardisation</div>
+        <p>
+          Codes mean the same thing across every web service, regardless of platform or language. It
+          does not matter whether your server is Python, Go, Rust, JavaScript or Ruby &mdash; success
+          is <code>200</code>, creation is <code>201</code>. It is a universal language, and you are
+          expected to follow it.
+        </p>
+      </div>
+
+      <p>
+        Codes are three digits, and the first digit classifies them:
+      </p>
+      <div class="stats">
+        <div class="stat"><div class="stat-value">1xx</div><div class="stat-label">Informational</div></div>
+        <div class="stat"><div class="stat-value">2xx</div><div class="stat-label">Success</div></div>
+        <div class="stat"><div class="stat-value">3xx</div><div class="stat-label">Redirection</div></div>
+        <div class="stat"><div class="stat-value">4xx</div><div class="stat-label">Client error</div></div>
+        <div class="stat"><div class="stat-value">5xx</div><div class="stat-label">Server error</div></div>
+      </div>
+
+      <h3>1xx &mdash; informational</h3>
+      <p>You will rarely meet these day to day, but for completeness:</p>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Code</th><th>Meaning</th><th>When it is used</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="chip chip--1xx">100</span></td>
+              <td>Continue</td>
+              <td>The server has received the headers and the client may proceed to send the body.
+                  Common in large uploads: send headers first, and only stream the body once the
+                  server has said it is happy.</td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--1xx">101</span></td>
+              <td>Switching Protocols</td>
+              <td>The server is switching protocols as the client requested &mdash; for example
+                  upgrading from HTTP to WebSocket.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>2xx &mdash; success</h3>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Code</th><th>Meaning</th><th>When to send it</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="chip chip--2xx">200</span></td>
+              <td>OK</td>
+              <td>The most common code. The request succeeded and the server is returning the
+                  requested resource or has performed the requested action. E.g. a successful
+                  <code>GET</code>.</td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--2xx">201</span></td>
+              <td>Created</td>
+              <td>The request was fulfilled and <strong>a new resource now exists</strong>. E.g. a
+                  <code>POST</code> or a form submission.</td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--2xx">204</span></td>
+              <td>No Content</td>
+              <td>Succeeded, but there is nothing to return. This is the preflight
+                  <code>OPTIONS</code> response, and a good choice for <code>DELETE</code> &mdash;
+                  &ldquo;deleted, nothing to send back.&rdquo;</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>3xx &mdash; redirection</h3>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Code</th><th>Meaning</th><th>When to send it</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="chip chip--3xx">301</span></td>
+              <td>Moved Permanently</td>
+              <td>The resource has permanently moved; future requests should use the new URL. You
+                  renamed <code>/users</code> to <code>/person</code> &mdash; add a <code>301</code> on
+                  the old route so old clients keep working while they migrate.</td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--3xx">302</span></td>
+              <td>Found (temporary)</td>
+              <td>Temporarily somewhere else; the client should keep using the original URL in future.
+                  Useful for a campaign: point a route at a different page for a few hours, then
+                  revert.</td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--3xx">304</span></td>
+              <td>Not Modified</td>
+              <td>The resource has not changed since the client last fetched it, so keep using the
+                  cached copy. Used with conditional <code>GET</code>s and <code>ETag</code>s &mdash;
+                  see <a href="#http-caching">caching</a> below.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>4xx &mdash; client errors</h3>
+      <p>
+        As a backend engineer you will deal with these most: they are the errors triggered by
+        something the client did.
+      </p>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Code</th><th>Meaning</th><th>When to send it</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="chip chip--4xx">400</span></td>
+              <td>Bad Request</td>
+              <td>The data is invalid or illogical &mdash; you expected a number and got an array, or
+                  expected an email and got a phone number. You are telling the client: the format is
+                  wrong, fix it and try again.</td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--4xx">401</span></td>
+              <td>Unauthorized</td>
+              <td>Authentication is required and the client either failed to provide valid credentials
+                  or is not authenticated at all. The JWT expired, or was never sent.</td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--4xx">403</span></td>
+              <td>Forbidden</td>
+              <td>The server understood the request and refuses to authorise it &mdash;
+                  <strong>even for an authenticated client</strong>. You are user A trying to delete
+                  user B's resource. You lack the permission.</td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--4xx">404</span></td>
+              <td>Not Found</td>
+              <td>The famous one. The requested resource is unavailable &mdash; wrong URL, or it has
+                  been deleted.</td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--4xx">405</span></td>
+              <td>Method Not Allowed</td>
+              <td>An invalid method for this route &mdash; a <code>PUT</code> to something that only
+                  accepts <code>GET</code> or <code>POST</code>. Very often a typo on the front end.</td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--4xx">409</span></td>
+              <td>Conflict</td>
+              <td>The request conflicts with current state. Folder names must be unique; the user
+                  <code>POST</code>s a folder that already exists. <code>409</code> tells them to pick
+                  another name.</td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--4xx">429</span></td>
+              <td>Too Many Requests</td>
+              <td>Rate limiting. You allow 60 requests per second per client; they exceeded it.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>5xx &mdash; server errors</h3>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Code</th><th>Meaning</th><th>When it happens</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="chip chip--5xx">500</span></td>
+              <td>Internal Server Error</td>
+              <td>An unexpected condition &mdash; a process broke, an exception went unhandled.
+                  Rather than hanging or returning an empty response, say <code>500</code> so the
+                  client knows the fault is yours.</td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--5xx">501</span></td>
+              <td>Not Implemented</td>
+              <td>The server does not support this method or functionality <em>yet</em>, but intends
+                  to. You are signalling intent to the client.</td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--5xx">502</span></td>
+              <td>Bad Gateway</td>
+              <td>A proxy or load balancer (nginx, say) received an invalid response from the upstream
+                  server. You rarely return this deliberately &mdash; proxies produce it.</td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--5xx">503</span></td>
+              <td>Service Unavailable</td>
+              <td>Temporarily unable to handle the request &mdash; heavy traffic or maintenance. Tells
+                  the client to try again later.</td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--5xx">504</span></td>
+              <td>Gateway Timeout</td>
+              <td>Like <code>502</code>, but specifically: the upstream did not respond within the
+                  timeout. nginx waited on your app server and gave up.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--tip">
+        <div class="callout-label">Notice what the demo server does</div>
+        <p>
+          The <code>500</code> response says only &ldquo;internal server error&rdquo; &mdash; no stack
+          trace, no detail. That is deliberate: leaking internals to the client is a security problem.
+          Be generous with detail in your logs, stingy in your responses.
+        </p>
+      </div>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>The first digit is the class; that alone tells the client whose fault it is.</li>
+          <li><code>200</code> read, <code>201</code> created, <code>204</code> nothing to return.</li>
+          <li><code>401</code> is &ldquo;who are you?&rdquo;; <code>403</code> is &ldquo;I know who you
+              are and you still may not.&rdquo;</li>
+          <li><code>502</code>/<code>504</code> come from proxies, not from your handler.</li>
+          <li>Keep <code>5xx</code> bodies vague. Keep your logs detailed.</li>
+        </ul>
+      </div>
+
+      <h2 id="http-caching">HTTP caching</h2>
+      <p>
+        Caching means storing copies of responses for reuse, so the same request need not hit the
+        server again. It improves load time, reduces bandwidth and lowers server load &mdash; the
+        client does not download data it already has, and the server does not send data that has not
+        changed.
+      </p>
+      <p>Three headers do the work, and the flow is best followed as a trail of requests.</p>
+
+      <ol class="flow">
+        <li>
+          <span class="flow-actor">Step 1 &middot; first fetch</span>
+          <span class="flow-title">Server returns the resource and three caching headers</span>
+          <div class="msg">
+            <div class="msg-head"><span class="dot dot--res"></span> 200 &mdash; initial response</div>
+<pre><code><span class="v">HTTP/1.1</span> <span class="s2">200 OK</span>
+<span class="hl"><span class="hk">Cache-Control</span>: <span class="hv">max-age=10</span></span>   <span class="c">&larr; reuse for up to 10s</span>
+<span class="hl"><span class="hk">ETag</span>: <span class="hv">"3141"</span></span>                <span class="c">&larr; fingerprint of this body</span>
+<span class="hl"><span class="hk">Last-Modified</span>: <span class="hv">Tue, 26 Aug 2025 09:14:02 GMT</span></span>
+
+{ <span class="key">"resource"</span>: <span class="str">"..."</span> }</code></pre>
+          </div>
+          <p>
+            <code>Cache-Control</code> says how long the copy stays fresh. <code>ETag</code> is a
+            fingerprint &mdash; usually a hash computed from the response body; the demo uses a random
+            number for clarity. <code>Last-Modified</code> is when the resource last changed.
+          </p>
+        </li>
+        <li>
+          <span class="flow-actor">Step 2 &middot; fetch the same resource again</span>
+          <span class="flow-title">Client asks conditionally, using what it already has</span>
+          <div class="msg">
+            <div class="msg-head"><span class="dot"></span> Conditional GET</div>
+<pre><code><span class="m">GET</span> <span class="u">/api/resource</span> <span class="v">HTTP/1.1</span>
+<span class="hl"><span class="hk">If-None-Match</span>: <span class="hv">"3141"</span></span>
+<span class="hl"><span class="hk">If-Modified-Since</span>: <span class="hv">Tue, 26 Aug 2025 09:14:02 GMT</span></span></code></pre>
+          </div>
+          <p>
+            In words: <em>&ldquo;if the ETag no longer matches this, or the resource changed after
+            this timestamp, send me the new version. Otherwise I will use my cached copy.&rdquo;</em>
+          </p>
+        </li>
+        <li>
+          <span class="flow-actor">Step 3 &middot; nothing changed</span>
+          <span class="flow-title">Server replies <code>304 Not Modified</code></span>
+          <div class="msg">
+            <div class="msg-head"><span class="dot dot--res"></span> 304 &mdash; no body sent</div>
+<pre><code><span class="v">HTTP/1.1</span> <span class="s3">304 Not Modified</span>
+<span class="hk">ETag</span>: <span class="hv">"3141"</span></code></pre>
+          </div>
+          <p>
+            The server compared <code>If-None-Match</code> against the current ETag and checked the
+            modification date. Both matched, so: use your cached version. <strong>No body is
+            transferred at all.</strong>
+          </p>
+        </li>
+        <li>
+          <span class="flow-actor">Step 4 &middot; the resource is updated</span>
+          <span class="flow-title">Server responds <code>200</code> with a <em>new</em> ETag</span>
+          <p>
+            After an update, the next conditional <code>GET</code> still carries the old
+            <code>ETag: "3141"</code> &mdash; but the fingerprint on the server is now
+            <code>"2943"</code>. They disagree, so the server returns <code>200</code>, the fresh body
+            and the new ETag and <code>Last-Modified</code>.
+          </p>
+        </li>
+        <li>
+          <span class="flow-actor">Step 5 &middot; fetch again</span>
+          <span class="flow-title">Back to <code>304</code></span>
+          <p>
+            The client now sends <code>"2943"</code>, which matches, so the server returns
+            <code>304</code> once more. The cycle continues.
+          </p>
+        </li>
+      </ol>
+
+      <div class="callout callout--warn">
+        <div class="callout-label">Why you may not want to build on this</div>
+        <p>
+          In production this gets complicated fast, because the server has to generate and manage
+          every ETag by hand. Forget to bump one and the client happily keeps serving a stale
+          resource &mdash; a genuinely nasty class of bug.
+        </p>
+        <p>
+          These days there are better options. Client-side caching libraries such as React Query put
+          the client fully in charge of when to reuse and when to refetch, at what interval, with far
+          more control. Arguably a better solution than traditional HTTP caching. But it is worth
+          knowing HTTP caching exists &mdash; if your use case is simple enough, it is right there in
+          the protocol.
+        </p>
+      </div>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>Server sends <code>Cache-Control</code>, <code>ETag</code>, <code>Last-Modified</code>.</li>
+          <li>Client sends back <code>If-None-Match</code> and <code>If-Modified-Since</code>.</li>
+          <li>Unchanged &rarr; <code>304</code> with no body. Changed &rarr; <code>200</code> with a
+              new ETag.</li>
+          <li>The failure mode is a forgotten ETag serving stale data forever.</li>
+        </ul>
+      </div>
+
+      <h2>Content negotiation</h2>
+      <p>
+        Content negotiation is the mechanism by which client and server <strong>agree on the best
+        format</strong> for the data. The client indicates its preference &mdash; JSON, XML, HTML
+        &mdash; and the server responds with a compatible format, or a fallback if it cannot oblige.
+      </p>
+      <p>There are three kinds:</p>
+      <div class="cards">
+        <div class="card">
+          <div class="card-kicker">Type 01</div>
+          <h4>Media type</h4>
+          <p>The client states the desired format via <code>Accept</code> &mdash;
+             <code>application/json</code>, <code>application/xml</code>.</p>
+        </div>
+        <div class="card">
+          <div class="card-kicker">Type 02</div>
+          <h4>Language</h4>
+          <p>The client requests a language via <code>Accept-Language</code> &mdash;
+             <code>en</code>, <code>es</code>.</p>
+        </div>
+        <div class="card">
+          <div class="card-kicker">Type 03</div>
+          <h4>Encoding</h4>
+          <p>The client declares supported compression via <code>Accept-Encoding</code> &mdash;
+             <code>gzip</code>, <code>deflate</code>, <code>br</code>, <code>zstd</code>.</p>
+        </div>
+      </div>
+
+      <p>In the demo, changing one header at a time changes the response:</p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span> Request &mdash; English, JSON</div>
+<pre><code><span class="m">GET</span> <span class="u">/api/resource</span> <span class="v">HTTP/1.1</span>
+<span class="hk">Accept</span>: <span class="hv">application/json</span>
+<span class="hk">Accept-Language</span>: <span class="hv">en</span>
+<span class="hk">Accept-Encoding</span>: <span class="hv">gzip, deflate, br, zstd</span></code></pre>
+      </div>
+      <p>
+        Switch <code>Accept-Language</code> to <code>es</code> and the same endpoint returns Spanish
+        content. Switch <code>Accept</code> to <code>application/xml</code> and the same endpoint
+        returns XML &mdash; still in Spanish. One route, one handler, several representations, all
+        driven by headers.
+      </p>
+      <div class="callout callout--key">
+        <div class="callout-label">Why it matters</div>
+        <p>
+          The client declares its preferences &mdash; data format, language &mdash; and the server can
+          honour them. It makes the client's life easier without adding routes or query parameters.
+        </p>
+      </div>
+
+      <h3>Compression</h3>
+      <p>
+        Compression falls under the same umbrella, via <code>Accept-Encoding</code> and
+        <code>Content-Encoding</code>. To see why it matters, take a large JSON file &mdash; 11,000
+        entries &mdash; and fetch it twice.
+      </p>
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-value">3.8 MB</div>
+          <div class="stat-label">with gzip</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value">26 MB</div>
+          <div class="stat-label">compression disabled</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value">~85%</div>
+          <div class="stat-label">bandwidth saved</div>
+        </div>
+      </div>
+      <p>
+        Same file, same 11,000 entries. With <code>Content-Encoding: gzip</code> the response is
+        3.8&nbsp;MB; with compression turned off on the server it is 26&nbsp;MB. Now imagine every
+        client downloading that difference. The browser transparently decompresses and ends up with an
+        identical response &mdash; another thing that runs behind the scenes that you rarely touch, but
+        should know is there.
+      </p>
+
+      <h2>Persistent connections and keep-alive</h2>
+      <p>
+        In HTTP/1.0 every request&ndash;response cycle needed its own connection, and establishing and
+        tearing down TCP connections is slow and resource-intensive. HTTP/1.1 introduced
+        <strong>persistent connections</strong>: one TCP connection reused for many requests and
+        responses, avoiding that overhead entirely. The mechanism that enables it is
+        <strong>keep-alive</strong>.
+      </p>
+      <ul>
+        <li>
+          <strong>Persistent by default in HTTP/1.1.</strong> Connections stay open for further
+          requests unless explicitly closed. You do not have to do anything. Fewer connections means
+          lower latency and less resource use.
+        </li>
+        <li>
+          <strong>The <code>Connection: keep-alive</code> header</strong> is still sometimes used to
+          explicitly ask the server to hold the connection open. It can carry options such as a
+          <code>timeout</code> (how long to stay open) and <code>max</code> (how many requests before
+          closing).
+        </li>
+        <li>
+          <strong><code>Connection: close</code></strong> closes the connection after the response.
+          That was the HTTP/1.0 default, and can still be enforced explicitly in HTTP/1.1.
+        </li>
+      </ul>
+      <div class="callout callout--note">
+        <div class="callout-label">Practical note</div>
+        <p>You usually will not touch any of this. The defaults are fine.</p>
+      </div>
+
+      <h2>Large requests and large responses</h2>
+      <p>
+        The last mechanical topic: how a server accepts large uploads &mdash; video, images, audio,
+        any file much bigger than our typical JSON &mdash; and how a client receives large responses.
+      </p>
+
+      <h3>Uploading: <code>multipart/form-data</code></h3>
+      <p>
+        Multipart is how you send files to a server. Unlike a normal JSON body, the file's binary data
+        is transferred <strong>in parts</strong> &mdash; hence &ldquo;multipart&rdquo;.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span> Multipart upload</div>
+<pre><code><span class="m">POST</span> <span class="u">/api/upload</span> <span class="v">HTTP/1.1</span>
+<span class="hk">Content-Length</span>: <span class="hv">184203</span>
+<span class="hl"><span class="hk">Content-Type</span>: <span class="hv">multipart/form-data; boundary=----WebKitFormBoundaryX7hQ</span></span>
+
+------WebKitFormBoundaryX7hQ     <span class="c">&larr; delimiter: part begins</span>
+<span class="hk">Content-Disposition</span>: <span class="hv">form-data; name="file"; filename="cat.png"</span>
+<span class="hk">Content-Type</span>: <span class="hv">image/png</span>
+
+<span class="c">&lt;binary data&hellip;&gt;</span>
+------WebKitFormBoundaryX7hQ--   <span class="c">&larr; same delimiter: part ends</span></code></pre>
+      </div>
+      <p>
+        The important part is <code>boundary</code>. Since the binary data is transferred in parts,
+        something has to mark where each part starts and stops &mdash; a delimiter. That is what the
+        boundary string is for. Search the raw request and you will find it once at the start of the
+        binary data and again at the end. The server reads the parts, reassembles the file, and
+        responds with details confirming the upload.
+      </p>
+
+      <h3>Downloading: streaming in chunks</h3>
+      <p>
+        For the reverse direction &mdash; a large text file the server should stream rather than send
+        in one lump &mdash; two headers do the work.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot dot--res"></span> Streamed response</div>
+<pre><code><span class="v">HTTP/1.1</span> <span class="s2">200 OK</span>
+<span class="hl"><span class="hk">Content-Type</span>: <span class="hv">text/event-stream</span></span>   <span class="c">&larr; not plain text: a stream of events</span>
+<span class="hl"><span class="hk">Connection</span>: <span class="hv">keep-alive</span></span>            <span class="c">&larr; hold the connection open</span>
+<span class="hk">Cache-Control</span>: <span class="hv">no-cache</span>
+
+data: chunk 1&hellip;
+data: chunk 2&hellip;
+data: chunk 3&hellip;</code></pre>
+      </div>
+      <p>
+        <code>Content-Type: text/event-stream</code> says this is not a text body but a stream of
+        events, and <code>Connection: keep-alive</code> keeps the connection open until everything has
+        been sent. In the network tab you can watch the chunks arriving continuously; the client keeps
+        appending them, reconstructing the whole file as it goes.
+      </p>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>Client preferences travel in <code>Accept*</code> headers; the server answers with
+              <code>Content-Type</code> / <code>Content-Encoding</code>.</li>
+          <li>gzip took a 26&nbsp;MB response down to 3.8&nbsp;MB. Compression is not optional at
+              scale.</li>
+          <li>HTTP/1.1 keeps connections alive by default; you rarely need to intervene.</li>
+          <li>Uploads: <code>multipart/form-data</code> with a <code>boundary</code> delimiter.</li>
+          <li>Large downloads: <code>text/event-stream</code> plus <code>keep-alive</code>.</li>
+        </ul>
+      </div>
+
+      <h2>SSL, TLS and HTTPS</h2>
+      <p>
+        We do not work with these directly, but the terms come up constantly and are worth being able
+        to place.
+      </p>
+      <ul>
+        <li>
+          <strong>SSL</strong> was the original protocol for securing communication between a client
+          and a server. It encrypts data so that sensitive information &mdash; passwords, card numbers
+          &mdash; cannot be intercepted. It is now <strong>outdated</strong>, due to security
+          vulnerabilities, and has been replaced.
+        </li>
+        <li>
+          <strong>TLS</strong> is the modern, more secure successor to SSL. It encrypts data in
+          transit so that anything between client and server is protected from interception and
+          tampering, and it uses <strong>certificates</strong> to authenticate the server and
+          establish the encrypted connection, preventing eavesdropping and breaches. TLS keeps getting
+          new versions; prefer the current recommended one.
+        </li>
+        <li>
+          <strong>HTTPS</strong> is simply HTTP plus the security features TLS provides (originally
+          SSL). When you visit an HTTPS site, TLS encrypts the conversation between your browser and
+          the server, protecting things like login credentials from interception.
+        </li>
+      </ul>
+      <div class="callout callout--tip">
+        <div class="callout-label">That is enough</div>
+        <p>
+          At the application level, that much understanding of TLS and HTTPS is all you need. Deeper
+          is network engineering territory.
+        </p>
+      </div>
+
+      <h2>Where that leaves us</h2>
+      <p>
+        That is a lot of ground. There is always more to read on HTTP, TLS and TCP &mdash; but to work
+        on backend systems, this is the set. If you have internalised it and can picture the whole
+        flow of each component, you will be able to read an unfamiliar codebase, follow a request
+        through it, and debug most of what goes wrong &mdash; because you now know which pieces come
+        into play, and when.
+      </p>
+      <div class="callout callout--key">
+        <div class="callout-label">If you remember five things</div>
+        <ul class="tight">
+          <li>HTTP is stateless; every request stands alone, and the client always speaks first.</li>
+          <li>Headers are the remote control &mdash; metadata that changes the whole interaction.</li>
+          <li>The method declares intent; idempotency follows from what the intent actually does.</li>
+          <li>CORS is a browser policy. Your handler ran; the browser refused to hand over the result.</li>
+          <li>Status codes are a contract, not a suggestion.</li>
+        </ul>
+      </div>
+
+    </div>
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; course notes. Built as a static site, no dependencies.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <p class="toc-title">On this page</p>
+    <ul id="toc-list"></ul>
+  </nav>
+
+</div>
+
+<div class="palette-backdrop" id="palette" role="dialog" aria-modal="true" aria-label="Search">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="text" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>

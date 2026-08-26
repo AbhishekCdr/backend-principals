@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Serialization & Deserialization &middot; Backend Principles</title>
+<meta name="description" content="Notes on serialization and deserialization: why two languages need a common wire format, text vs binary formats, and the rules of JSON.">
+<script>
+  /* set theme before first paint to avoid a flash of the wrong colours */
+  (function () {
+    try {
+      var s = localStorage.getItem('bp-theme');
+      var t = s || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+
+<header class="topbar">
+  <button class="icon-btn hamburger" id="hamburger" aria-label="Toggle navigation" aria-expanded="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ notes</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="nav-scrim" id="nav-scrim"></div>
+
+<div class="shell">
+
+  <aside class="sidebar" id="sidebar">
+    <p class="sidebar-title">Lessons</p>
+    <ul class="nav-list" id="nav-list"></ul>
+    <div class="sidebar-note">
+      <strong>How to read these.</strong> Every lesson ends each major part with a
+      <em>Key takeaways</em> box. If you are revising, read only those first, then dive
+      back into whatever felt shaky.
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 03</p>
+      <h1>Serialization &amp; Deserialization</h1>
+      <p class="lead">
+        A JavaScript client sends an object. A Rust server receives it. The two languages share no
+        data types &mdash; one is dynamic and interpreted, the other strict and compiled. So how does
+        one make sense of the other? By <strong>agreeing on a common format</strong> before either of
+        them starts talking.
+      </p>
+      <div class="pills">
+        <span class="pill">the problem</span>
+        <span class="pill">OSI framing</span>
+        <span class="pill">common format</span>
+        <span class="pill">text vs binary</span>
+        <span class="pill">JSON</span>
+      </div>
+    </header>
+
+    <div class="prose">
+
+      <h2>The problem, stated precisely</h2>
+      <p>
+        The setup is the one from <a href="01-http.html">Lesson 01</a>: a client &mdash; a browser
+        &mdash; and a server, running on localhost or somewhere remote in AWS, GCP or Azure. They
+        communicate over a network: HTTP, or gRPC, or WebSockets. We are focusing on HTTP and
+        REST-style communication, and we will assume the client is a JavaScript app &mdash; React,
+        Angular, Vue, it does not matter.
+      </p>
+      <p>
+        The client sends a request; the server responds; the client parses the response and makes sense
+        of it. That last clause is what this lesson is about. Consider:
+      </p>
+
+      <div class="cards cards--2">
+        <div class="card">
+          <div class="card-kicker">Client</div>
+          <h4>JavaScript</h4>
+          <p>
+            Dynamically typed. Not compiled. Objects are loose bags of keys. This is what it wants to
+            send:
+          </p>
+          <p><code>{ name: "Abhishek", age: 27 }</code></p>
+        </div>
+        <div class="card">
+          <div class="card-kicker">Server</div>
+          <h4>Rust</h4>
+          <p>
+            Strictly typed. Compiled. Data lives in <code>struct</code>s with fixed field types.
+            Nothing about JavaScript's runtime shape exists here.
+          </p>
+          <p><code>struct User { name: String, age: u8 }</code></p>
+        </div>
+      </div>
+
+      <p>
+        So: how does a value produced in one language, transmitted over a network, arrive at a machine
+        somewhere else on the internet, get understood in <em>that</em> machine's own type system, have
+        business logic run against it, and come back in a form the original client can understand again?
+      </p>
+
+      <h3>Where your responsibility begins and ends</h3>
+      <p>
+        It helps to know roughly where this sits in the OSI model. If you have studied it you will know
+        the data does not travel as your object &mdash; it becomes frames, then packets, then in the
+        end voltage signals and bits over copper or fibre. You do not need to master any of that. What
+        you need is the right mental model:
+      </p>
+      <div class="callout callout--key">
+        <div class="callout-label">The mental model</div>
+        <p>
+          At the <strong>application layer</strong>, your data is in the agreed format &mdash; say
+          JSON. Below that, it is converted into frames, packets and eventually <code>0</code>s and
+          <code>1</code>s. That is <em>not your concern</em>. Those layers reverse themselves on the
+          other side, and by the time the data reaches the server's application layer it is JSON again.
+          The server only ever reads JSON.
+        </p>
+        <p>
+          Your responsibility is the top layer. Everything in between takes care of itself.
+        </p>
+      </div>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span> The round trip, layer by layer</div>
+<pre><code>CLIENT                                          SERVER
+------                                          ------
+JS object                                       Rust struct
+   &darr;  serialize                                  &uarr;  deserialize
+<span class="str">JSON</span>            &larr;&mdash; application layer &mdash;&rarr;      <span class="str">JSON</span>
+   &darr;                                               &uarr;
+frames / packets                                frames / packets
+   &darr;                                               &uarr;
+<span class="v">0 1 0 1 1 0 &hellip;</span>  &larr;&mdash;&mdash; the network &mdash;&mdash;&rarr;  <span class="v">0 1 0 1 1 0 &hellip;</span>
+
+<span class="c">You own the top line. The rest is somebody else's problem.</span></code></pre>
+      </div>
+
+      <h2>The solution: agree on a standard</h2>
+      <p>
+        Imagine you were handed this problem cold: two machines in different locations, connected over
+        a network, must exchange data such that either side can parse it &mdash;
+        <strong>language-agnostically</strong>. The obvious answer, and the one the industry landed on,
+        is to define a common standard. Which is a fancy way of saying: come up with a set of rules,
+        and get both sides to agree to them.
+      </p>
+      <ol class="flow">
+        <li>
+          <span class="flow-actor">Client</span>
+          <span class="flow-title">Serialize</span>
+          <p>The client does its work in its own language, then <strong>converts</strong> the data from
+             JavaScript into the agreed format and sends it over the network.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Server</span>
+          <span class="flow-title">Deserialize</span>
+          <p>The server receives the agreed format and converts it into <em>its</em> own
+             representation &mdash; a Rust struct &mdash; then runs whatever logic it needs to.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Server</span>
+          <span class="flow-title">Serialize again</span>
+          <p>To reply, the server converts its struct back into the common format and sends it.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Client</span>
+          <span class="flow-title">Deserialize again</span>
+          <p>The client parses it back into JavaScript and carries on.</p>
+        </li>
+      </ol>
+
+      <div class="callout callout--key">
+        <div class="callout-label">Definition</div>
+        <p>
+          <strong>Serialization and deserialization are the conversion of data to and from a common
+          format</strong> &mdash; for transmission or for storage &mdash; so that the data is
+          <em>domain-agnostic</em>. In this case, language-agnostic: machines written in different
+          languages, running in different environments, can all make sense of it and respond.
+        </p>
+      </div>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>Two languages cannot share types, so the problem is real, not theoretical.</li>
+          <li>Serialize on the way out, deserialize on the way in &mdash; on <em>both</em> sides.</li>
+          <li>Your responsibility stops at the application layer; frames, packets and bits handle
+              themselves.</li>
+        </ul>
+      </div>
+
+      <h2>The landscape of standards</h2>
+      <p>
+        As with everything in backend, there are far more options than anyone can learn. Here is the
+        map, and where we plant our flag.
+      </p>
+      <div class="cards cards--2">
+        <div class="card">
+          <div class="card-kicker">Family 01</div>
+          <h4>Text-based formats</h4>
+          <p>Human-readable. Easy to debug, larger on the wire.</p>
+          <ul>
+            <li><strong>JSON</strong> &mdash; the dominant choice for HTTP client&ndash;server
+                communication. Roughly 80% of what you will meet.</li>
+            <li><strong>YAML</strong> &mdash; mostly configuration.</li>
+            <li><strong>XML</strong> &mdash; older, still present in enterprise and SOAP systems.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-kicker">Family 02</div>
+          <h4>Binary formats</h4>
+          <p>Not human-readable. Compact and fast, needs a schema and tooling.</p>
+          <ul>
+            <li><strong>Protobuf</strong> &mdash; the most popular; what gRPC uses.</li>
+            <li><strong>Avro</strong>, and others &mdash; common in data pipelines.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout callout--note">
+        <div class="callout-label">Why we only cover JSON</div>
+        <p>
+          The same reason we cover HTTP rather than gRPC and WebSockets, and Postgres rather than every
+          database: you need <em>one</em> thing that is used everywhere, so you can get experience and
+          pick up the rest as your career progresses. For serialization over HTTP, that thing is JSON.
+        </p>
+      </div>
+
+      <h2>JSON</h2>
+      <p>
+        JSON stands for <strong>JavaScript Object Notation</strong>. In looks and behaviour it closely
+        resembles a JavaScript object, which explains the name &mdash; but it is not limited to
+        JavaScript and turns up everywhere: configuration files, HTTP request and response bodies, and
+        log files (JSON is a very popular choice for structured application logs). Our focus here is
+        transmission.
+      </p>
+      <p>
+        Its defining strength is that it is <strong>completely human-readable</strong>, and its data
+        types are fundamental enough to exist in every language.
+      </p>
+
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span> A typical JSON object</div>
+<pre><code>{   <span class="c">&larr; opening brace</span>
+  <span class="key">"id"</span>: <span class="num">42</span>,                          <span class="c">number</span>
+  <span class="key">"name"</span>: <span class="str">"Abhishek"</span>,                 <span class="c">string</span>
+  <span class="key">"isActive"</span>: <span class="num">true</span>,                  <span class="c">boolean</span>
+  <span class="key">"roles"</span>: [<span class="str">"admin"</span>, <span class="str">"editor"</span>],       <span class="c">array</span>
+  <span class="key">"address"</span>: {                        <span class="c">nested object</span>
+    <span class="key">"country"</span>: <span class="str">"India"</span>,
+    <span class="key">"phone"</span>: <span class="num">3456</span>
+  },
+  <span class="key">"deletedAt"</span>: <span class="num">null</span>                  <span class="c">null</span>
+}   <span class="c">&larr; closing brace</span></code></pre>
+      </div>
+
+      <h3>The rules, in full</h3>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Rule</th><th>Detail</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="nowrap"><strong>Braces</strong></td>
+              <td>An object has an opening <code>{</code> and a matching closing <code>}</code>. Every
+                  nested object too.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>Keys are strings</strong></td>
+              <td>Keys must be inside <strong>double quotes</strong> and must be strings. You cannot
+                  use any other data type as a key. Not single quotes &mdash; double.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>Allowed values</strong></td>
+              <td>A string, a number, a boolean, <code>null</code>, an array, or another object.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>Nesting is recursive</strong></td>
+              <td>A nested object obeys exactly the same rules as the outer one: double-quoted string
+                  keys, values of the permitted types.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout callout--tip">
+        <div class="callout-label">That really is the whole specification</div>
+        <p>
+          There is no advanced JSON to learn. Braces, double-quoted string keys, a short list of value
+          types, and recursion. Its simplicity is why it won.
+        </p>
+      </div>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>Text formats (JSON, YAML, XML) are readable and bigger; binary formats (Protobuf, Avro)
+              are compact and need a schema.</li>
+          <li>JSON is the default for HTTP because it is simple and universally understood.</li>
+          <li>The rules: braces, double-quoted string keys, six value types, recursion. Nothing more.</li>
+        </ul>
+      </div>
+
+      <h2>Watching it happen</h2>
+      <p>
+        Take the demo from <a href="02-routing.html">Lesson 02</a> and look at it again &mdash; this
+        time paying attention only to the data format rather than the route. Fire
+        <code>POST /api/books</code> and open the request in an HTTP inspector.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span> Request &mdash; what the client serialized</div>
+<pre><code><span class="m">POST</span> <span class="u">/api/books</span> <span class="v">HTTP/1.1</span>
+<span class="hk">Content-Type</span>: <span class="hv">application/json</span>
+
+{
+  <span class="key">"id"</span>: <span class="num">4</span>,
+  <span class="key">"title"</span>: <span class="str">"The Pragmatic Programmer"</span>,
+  <span class="key">"author"</span>: <span class="str">"Hunt &amp; Thomas"</span>
+}</code></pre>
+      </div>
+      <p>
+        Exactly the structure we described: braces, double-quoted string keys, one number and two
+        strings. This is what goes onto the network.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot dot--res"></span> Response &mdash; what the server serialized back</div>
+<pre><code><span class="v">HTTP/1.1</span> <span class="s2">201 Created</span>
+<span class="hk">Content-Type</span>: <span class="hv">application/json</span>
+
+{
+  <span class="key">"data"</span>: [
+    { <span class="key">"id"</span>: <span class="num">1</span>, <span class="key">"title"</span>: <span class="str">"Clean Code"</span>,               <span class="key">"author"</span>: <span class="str">"Martin"</span> },
+    { <span class="key">"id"</span>: <span class="num">4</span>, <span class="key">"title"</span>: <span class="str">"The Pragmatic Programmer"</span>, <span class="key">"author"</span>: <span class="str">"Hunt &amp; Thomas"</span> }
+  ]
+}</code></pre>
+      </div>
+      <p>
+        The server took the incoming JSON, deserialized it into its own types, added the record, then
+        serialized the whole collection back out. Note the shape: an object whose <code>data</code> key
+        holds an array, each element itself a JSON object obeying the same rules. The client receives
+        it, parses it, and renders it.
+      </p>
+      <div class="callout callout--note">
+        <div class="callout-label">And the language on either end is irrelevant</div>
+        <p>
+          In this demo the client is JavaScript, but it could be PHP, Swift or a Go program. The server
+          could be Rust, Python or Ruby. Neither side knows or cares &mdash; that is the entire payoff
+          of agreeing on a format.
+        </p>
+      </div>
+
+      <h2>Where that leaves us</h2>
+      <p>
+        Serialization and deserialization have very few concepts to them. It is less a technique to
+        master than a <strong>phenomenon to be aware of</strong>: the client serializes to a common
+        format, the server deserializes it, understands it, performs its business logic, serializes its
+        answer back, and the client deserializes that. That whole round trip is what the words mean.
+      </p>
+      <div class="callout callout--key">
+        <div class="callout-label">If you remember three things</div>
+        <ul class="tight">
+          <li>Two languages cannot share types, so they share a <em>format</em> instead.</li>
+          <li>Your responsibility stops at the application layer &mdash; frames and packets are not
+              your problem.</li>
+          <li>JSON: braces, double-quoted string keys, six value types, recursion. That is all of it.</li>
+        </ul>
+      </div>
+
+    </div>
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; course notes. Built as a static site, no dependencies.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <p class="toc-title">On this page</p>
+    <ul id="toc-list"></ul>
+  </nav>
+
+</div>
+
+<div class="palette-backdrop" id="palette" role="dialog" aria-modal="true" aria-label="Search">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="text" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>

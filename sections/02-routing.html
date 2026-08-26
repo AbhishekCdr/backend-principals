@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Routing &middot; Backend Principles</title>
+<meta name="description" content="Notes on backend routing: method plus path as the handler key, static and dynamic routes, path params, query params, nested routes, versioning and catch-all routes.">
+<script>
+  /* set theme before first paint to avoid a flash of the wrong colours */
+  (function () {
+    try {
+      var s = localStorage.getItem('bp-theme');
+      var t = s || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+
+<header class="topbar">
+  <button class="icon-btn hamburger" id="hamburger" aria-label="Toggle navigation" aria-expanded="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ notes</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="nav-scrim" id="nav-scrim"></div>
+
+<div class="shell">
+
+  <aside class="sidebar" id="sidebar">
+    <p class="sidebar-title">Lessons</p>
+    <ul class="nav-list" id="nav-list"></ul>
+    <div class="sidebar-note">
+      <strong>How to read these.</strong> Every lesson ends each major part with a
+      <em>Key takeaways</em> box. If you are revising, read only those first, then dive
+      back into whatever felt shaky.
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 02</p>
+      <h1>Routing</h1>
+      <p class="lead">
+        HTTP methods express the <strong>what</strong> of a request &mdash; your intent. Routing
+        expresses the <strong>where</strong>. Put the two together and the server has enough to pick
+        exactly one piece of code to run. That mapping is all routing is.
+      </p>
+      <div class="pills">
+        <span class="pill">method + path</span>
+        <span class="pill">static routes</span>
+        <span class="pill">path params</span>
+        <span class="pill">query params</span>
+        <span class="pill">nesting</span>
+        <span class="pill">versioning</span>
+        <span class="pill">catch-all</span>
+      </div>
+    </header>
+
+    <div class="prose">
+
+      <h2>What routing is</h2>
+      <p>
+        In <a href="01-http.html">Lesson 01</a> we said the method describes intent: fetch data, add
+        data, update data, delete data. But intent alone is not actionable. You also have to tell the
+        server <em>where</em> &mdash; which resource you want to perform that action on.
+      </p>
+      <p>
+        Take a request with method <code>GET</code> and path <code>/users</code>. The action is
+        &ldquo;fetch&rdquo;; the resource is &ldquo;users&rdquo;. The server takes those two things
+        together, maps them to a particular handler, runs whatever business logic and database work
+        that handler contains, and returns an array of users.
+      </p>
+      <div class="callout callout--key">
+        <div class="callout-label">The one-line definition</div>
+        <p>
+          <strong>Routing is mapping URL parameters to server-side logic.</strong> That is genuinely
+          all there is to it &mdash; everything else in this lesson is variations on how you write the
+          left-hand side of that mapping.
+        </p>
+      </div>
+
+      <h3>The method and the path form a compound key</h3>
+      <p>
+        Look at two requests to the same address:
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span> Two requests, one path</div>
+<pre><code><span class="m">GET</span>  <span class="u">/api/books</span> <span class="v">HTTP/1.1</span>   <span class="c">&larr; fetch the list of books</span>
+<span class="m">POST</span> <span class="u">/api/books</span> <span class="v">HTTP/1.1</span>   <span class="c">&larr; create a book</span></code></pre>
+      </div>
+      <p>
+        The path is identical. What differs is the method. Inside the server, the method and the route
+        are <strong>concatenated into a single key</strong> which maps to one handler. So
+        <code>GET /api/books</code> and <code>POST /api/books</code> are two entirely distinct routes
+        that can never collide &mdash; the method disambiguates them.
+      </p>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Method</th><th>Path</th><th>Handler does</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="chip chip--get">GET</span></td>
+              <td><code>/api/books</code></td>
+              <td>Authenticate if needed, read the books, return them.</td>
+            </tr>
+            <tr>
+              <td><span class="chip chip--post">POST</span></td>
+              <td><code>/api/books</code></td>
+              <td>Create a book from the request body, then return the collection.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>Method = what. Route = where. Together they select the handler.</li>
+          <li><code>(method, path)</code> is a compound key, so the same path can host many routes.</li>
+        </ul>
+      </div>
+
+      <h2>Static routes</h2>
+      <p>
+        <code>/api/books</code> is a <strong>static route</strong> &mdash; there are no variable
+        parameters anywhere in it. The string never changes. You use exactly
+        <code>/api/books</code> every time you make the request, and it always returns the same
+        <em>kind</em> of response. A constant.
+      </p>
+
+      <h2>Dynamic routes and path parameters</h2>
+      <p>
+        Now the opposite case. Suppose you want to fetch the details of one specific user, identified
+        by their ID.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span> Request</div>
+<pre><code><span class="m">GET</span> <span class="u">/api/users/123</span> <span class="v">HTTP/1.1</span></code></pre>
+      </div>
+      <p>
+        The server extracts <code>123</code> from the path and does whatever it needs to &mdash; fetch
+        that user from the database, return their details. On the server side, the route declaration
+        looks roughly like this, in any language or framework:
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span> Route declaration &mdash; pseudocode</div>
+<pre><code>router.<span class="m">get</span>(<span class="str">"/api/users/:id"</span>, handler)
+       <span class="c">&#94;&#94;&#94;         &#94;&#94;&#94;&#94;</span>
+       <span class="c">method      dynamic segment</span></code></pre>
+      </div>
+      <p>
+        The server is saying: <em>any request whose method is <code>GET</code> and whose path is
+        <code>/api/users/</code> followed by any string, route to this handler.</em> The
+        <code>:id</code> colon convention marks a dynamic parameter, and you will find it in Java,
+        Python, Node, Go and Rust alike &mdash; it is an industry-wide convention rather than a rule of
+        HTTP.
+      </p>
+      <p>
+        When <code>GET /api/users/123</code> arrives, matching proceeds segment by segment:
+        <code>/api</code> matches, <code>/users</code> matches, and <code>123</code> drops into the
+        <code>:id</code> slot.
+      </p>
+      <div class="callout callout--note">
+        <div class="callout-label">Everything in a path is a string</div>
+        <p>
+          <code>123</code> <em>looks</em> like a number, but in route paths numbers and special
+          characters alike arrive as strings. Convert deliberately on the server.
+        </p>
+      </div>
+      <div class="callout callout--tip">
+        <div class="callout-label">Read it out loud</div>
+        <p>
+          <code>GET /api/users/123</code> reads as: &ldquo;fetch me some data &mdash; the data lives
+          under users &mdash; specifically the user whose ID is 123.&rdquo; That readability is the
+          entire point of REST-style APIs: the URL is a human-readable construct.
+        </p>
+      </div>
+      <p>
+        Terminology: <code>:id</code> here is a <strong>path parameter</strong> (equivalently a
+        <em>route parameter</em>). They are called path parameters because they sit directly after a
+        forward slash &mdash; they are part of the path itself.
+      </p>
+
+      <h2>Query parameters</h2>
+      <p>
+        The second, easily confused kind of parameter. Consider a search request:
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span> Request with a query string</div>
+<pre><code><span class="m">GET</span> <span class="u">/api/search?query=some+value</span> <span class="v">HTTP/1.1</span>
+    <span class="c">&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94; &#94;&#94;&#94;&#94;&#94; &#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;</span>
+    <span class="c">path        key   value</span></code></pre>
+      </div>
+      <p>
+        Everything after the <code>?</code> is the <strong>query string</strong>, made up of
+        key&ndash;value pairs. The path before it is still what the server uses (with the method) to
+        pick a handler.
+      </p>
+
+      <h3>Why they exist</h3>
+      <p>
+        <code>POST</code> and <code>PUT</code> requests have a body &mdash; a container for sending
+        arbitrary client-defined values. <code>GET</code> requests, in REST, do not. So how does a
+        <code>GET</code> send values?
+      </p>
+      <p>
+        You could try to use path parameters. Technically <code>/api/search/some+value</code> works.
+        But path parameters serve a specific purpose: they carry <strong>semantic
+        meaning</strong>. <code>/api/users/123</code> means &ldquo;the user with ID 123&rdquo;; the
+        segment identifies a resource. A free-text search term is not a resource identifier. Stuffing
+        it into the path is hard to maintain and defeats the point of a semantic URL.
+      </p>
+      <div class="callout callout--key">
+        <div class="callout-label">The division of labour</div>
+        <p>
+          <strong>Path parameters identify a resource.</strong>
+          <strong>Query parameters describe how you want it</strong> &mdash; metadata about the
+          request: search terms, filters, sort order, pagination.
+        </p>
+      </div>
+
+      <h3>The canonical example: pagination</h3>
+      <p>
+        Say <code>/api/books</code> returns a paginated list. The first request needs no query
+        parameters at all &mdash; the server applies its defaults:
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot dot--res"></span> Response with pagination metadata</div>
+<pre><code>{
+  <span class="key">"data"</span>: [ <span class="c">/* 20 books */</span> ],
+  <span class="key">"meta"</span>: {
+    <span class="key">"total"</span>: <span class="num">100</span>,
+    <span class="key">"limit"</span>: <span class="num">20</span>,
+    <span class="key">"currentPage"</span>: <span class="num">1</span>,
+    <span class="key">"totalPages"</span>: <span class="num">5</span>
+  }
+}</code></pre>
+      </div>
+      <p>
+        The server sent a chunk of 20 and told the client everything it needs to ask for more: 100
+        books in total, currently on page 1, 5 pages in all. The client uses that metadata to build
+        the next request:
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span> Asking for page two</div>
+<pre><code><span class="m">GET</span> <span class="u">/api/books?page=2&amp;limit=20</span> <span class="v">HTTP/1.1</span></code></pre>
+      </div>
+      <p>
+        Same route, same handler, different slice of data &mdash; and no request body needed. Beyond
+        pagination, the usual residents of the query string are filters, sort fields and sort direction
+        (ascending or descending). Anything that is a preference about the response rather than an
+        identity of a resource.
+      </p>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>Path params sit in the path after a slash and <em>identify</em> a resource:
+              <code>/users/:id</code>.</li>
+          <li>Query params sit after <code>?</code> as key&ndash;value pairs and <em>modify</em> the
+              request.</li>
+          <li>They exist because <code>GET</code> has no body.</li>
+          <li>Pagination, filtering and sorting belong in the query string.</li>
+        </ul>
+      </div>
+
+      <h2>Nested routes</h2>
+      <p>
+        Nesting is not really a separate <em>type</em> of routing &mdash; it is a practice you will see
+        everywhere, because expressing semantics in REST APIs pushes you towards nesting resources.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span> A nested route</div>
+<pre><code><span class="m">GET</span> <span class="u">/api/users/123/posts/456</span> <span class="v">HTTP/1.1</span>
+    <span class="c">&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94; &#94;&#94;&#94; &#94;&#94;&#94;&#94;&#94; &#94;&#94;&#94;</span>
+    <span class="c">static     param nested param</span></code></pre>
+      </div>
+      <p>
+        Read it as a sentence: &ldquo;of the user with ID 123, fetch their posts, and specifically the
+        post with ID 456.&rdquo; The value of nesting is that <strong>each level you stop at is itself
+        a distinct route with distinct meaning</strong>.
+      </p>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Route</th><th>Kind</th><th>Handler returns</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="nowrap"><code>/api/users</code></td>
+              <td>Static</td>
+              <td>All users.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><code>/api/users/123</code></td>
+              <td>+ one path param</td>
+              <td>The details of user 123.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><code>/api/users/123/posts</code></td>
+              <td>+ nested resource</td>
+              <td>All posts belonging to user 123.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><code>/api/users/123/posts/456</code></td>
+              <td>+ second path param</td>
+              <td>One specific post of user 123.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Four different routes, four different handlers, four different responses &mdash; all built out
+        of the same vocabulary. You will see nesting in essentially any API of more than trivial
+        complexity.
+      </p>
+
+      <h2>Route versioning and deprecation</h2>
+      <p>
+        Notice the <code>v1</code> in a path like <code>/api/v1/products</code>. That is
+        <strong>route versioning</strong>, and it is standard practice in REST APIs.
+      </p>
+      <p>Consider two versions of the same endpoint:</p>
+      <div class="compare">
+        <div class="compare-col">
+          <h4>GET /api/v1/products</h4>
+<pre class="codeblock">{
+  "data": [
+    { "id": 1, <b class="tok-old">"name"</b>: "Desk", "price": 210 }
+  ]
+}</pre>
+        </div>
+        <div class="compare-col">
+          <h4>GET /api/v2/products</h4>
+<pre class="codeblock">{
+  "data": [
+    { "id": 1, <b class="tok-new">"title"</b>: "Desk", "price": 210 }
+  ]
+}</pre>
+        </div>
+      </div>
+      <p>
+        A trivial example &mdash; <code>name</code> became <code>title</code> &mdash; but the mechanism
+        is what matters. Suppose you were serving a web app, and later you also have to serve a React
+        Native or Flutter client that needs a different response shape. Your options:
+      </p>
+      <ul>
+        <li>
+          <strong>Change the route</strong> &mdash; invent <code>/api/new-products</code>. Works, but
+          now your URL space is a graveyard of adjectives.
+        </li>
+        <li>
+          <strong>Bump the version</strong> &mdash; keep the route, serve the new shape under
+          <code>v2</code>. Your intent is explicit: v1 responds like this, v2 responds like that.
+        </li>
+      </ul>
+      <h3>How deprecation actually plays out</h3>
+      <ol class="flow">
+        <li>
+          <span class="flow-actor">Ship</span>
+          <span class="flow-title"><code>v2</code> goes live alongside <code>v1</code></span>
+          <p>Both versions serve traffic. Nothing breaks.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Announce</span>
+          <span class="flow-title"><code>v1</code> is deprecated</span>
+          <p>Front-end engineers and third-party consumers are told: v1 goes away after this release.
+             They now have a defined <strong>migration window</strong>.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Migrate</span>
+          <span class="flow-title">Clients move to <code>v2</code> at their own pace</span>
+          <p>Each team migrates within the window rather than in an emergency.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Retire</span>
+          <span class="flow-title"><code>v1</code> is removed</span>
+          <p>Eventually you drop v1 entirely, and v2 becomes the baseline.</p>
+        </li>
+      </ol>
+      <div class="callout callout--key">
+        <div class="callout-label">What versioning really buys you</div>
+        <p>
+          A stable, repeatable workflow for shipping <strong>breaking changes</strong> to an API
+          without breaking anybody &mdash; and a window in which your consumers can migrate on their
+          own schedule.
+        </p>
+      </div>
+
+      <h2>The catch-all route</h2>
+      <p>
+        Finally: what happens when a request arrives for a route the server does not serve? Say
+        <code>GET /api/v3/products</code>, and there is no v3. There is no handler; nothing caters to
+        that path.
+      </p>
+      <p>
+        The convention is that <strong>after</strong> registering every real route, the server
+        registers a wildcard &mdash; <code>*</code> &mdash; last. Anything that has fallen through
+        every other match lands there, and that handler returns a friendly message.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span> Registration order matters</div>
+<pre><code>router.<span class="m">get</span>(<span class="str">"/api/v1/products"</span>, ...)
+router.<span class="m">get</span>(<span class="str">"/api/v2/products"</span>, ...)
+router.<span class="m">get</span>(<span class="str">"/api/users/:id"</span>,   ...)
+<span class="c">// ... all real routes first ...</span>
+router.<span class="m">all</span>(<span class="str">"*"</span>, notFoundHandler)   <span class="c">&larr; last: catches the leftovers</span></code></pre>
+      </div>
+      <div class="msg">
+        <div class="msg-head"><span class="dot dot--res"></span> Catch-all response</div>
+<pre><code><span class="v">HTTP/1.1</span> <span class="s4">404 Not Found</span>
+<span class="hk">Content-Type</span>: <span class="hv">application/json</span>
+
+{ <span class="key">"error"</span>: <span class="str">"Route not found"</span>,
+  <span class="key">"message"</span>: <span class="str">"GET /api/v3/products is not a route on this server"</span> }</code></pre>
+      </div>
+      <p>
+        Without it, the default behaviour is an empty or null response &mdash; unhelpful to whoever is
+        debugging. With it, the client is told plainly that this endpoint does not exist.
+      </p>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>Nesting expresses ownership; every level you stop at is its own route.</li>
+          <li>Version in the path (<code>/api/v1/</code>) so breaking changes get a migration window.</li>
+          <li>Register the <code>*</code> catch-all last, and return a real message instead of null.</li>
+          <li>With static routes, path params, query params, nesting and versioning you can read the
+              routing layer of essentially any backend codebase.</li>
+        </ul>
+      </div>
+
+    </div>
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; course notes. Built as a static site, no dependencies.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <p class="toc-title">On this page</p>
+    <ul id="toc-list"></ul>
+  </nav>
+
+</div>
+
+<div class="palette-backdrop" id="palette" role="dialog" aria-modal="true" aria-label="Search">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="text" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>

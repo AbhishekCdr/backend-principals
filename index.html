@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en" data-root="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backend Principles &middot; Course Notes</title>
+<meta name="description" content="Course notes on backend engineering from first principles: HTTP, routing, serialization, authentication and authorization.">
+<script>
+  (function () {
+    try {
+      var s = localStorage.getItem('bp-theme');
+      var t = s || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="assets/css/main.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ notes</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="home">
+
+  <section class="hero">
+    <p class="eyebrow">Course notes</p>
+    <h1>Backend engineering, from <em>first principles</em></h1>
+    <p class="lead">
+      Backend is enormous. Cover every component that could possibly be part of it and you will be
+      here for years. So these notes deliberately cover only what turns up in the overwhelming
+      majority of codebases &mdash; <strong>the 10% of backend that explains 90% of the code you
+      will actually read</strong>.
+    </p>
+    <p class="lead">
+      Concepts before code. No framework, no language &mdash; the mechanisms underneath, which stay
+      true whichever stack you end up in.
+    </p>
+    <div class="hero-meta">
+      <span><b>4</b> lessons</span>
+      <span><b>Concept-first</b> &middot; no code required</span>
+      <span>Language &amp; framework <b>agnostic</b></span>
+    </div>
+  </section>
+
+  <p class="section-label">Lessons</p>
+  <div class="lesson-grid" id="lesson-grid"></div>
+
+  <p class="section-label">How these notes are organised</p>
+  <div class="panel">
+    <ul class="legend">
+      <li>
+        <span class="legend-key">Lead</span>
+        <span>Every lesson opens with a one-paragraph statement of what the topic actually
+              <b>is</b>, before any detail.</span>
+      </li>
+      <li>
+        <span class="legend-key">Callouts</span>
+        <span><b>Key</b> boxes hold the idea worth memorising. <b>Note</b> adds context,
+              <b>Tip</b> is practical advice, and <b>Warn</b> flags something that bites in
+              production.</span>
+      </li>
+      <li>
+        <span class="legend-key">Flows</span>
+        <span>Numbered sequences for anything with an order to it &mdash; the CORS preflight, the
+              OIDC handshake, a login request.</span>
+      </li>
+      <li>
+        <span class="legend-key">Messages</span>
+        <span>Annotated request and response blocks. The comments in the margin are the part to
+              read.</span>
+      </li>
+      <li>
+        <span class="legend-key">Takeaways</span>
+        <span>Each major part closes with a boxed summary. <b>Revising? Read only these first</b>,
+              then go back into whatever felt shaky.</span>
+      </li>
+      <li>
+        <span class="legend-key">Search</span>
+        <span>Press <span class="kbd">&#8984;K</span> anywhere to jump to a lesson, a section or a
+              topic.</span>
+      </li>
+    </ul>
+  </div>
+
+  <footer class="foot">
+    Backend Principles &mdash; course notes. Built as a static site, no dependencies.
+    &copy; <span id="year"></span>
+  </footer>
+</div>
+
+<div class="palette-backdrop" id="palette" role="dialog" aria-modal="true" aria-label="Search">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="text" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/app.js"></script>
+</body>
+</html>

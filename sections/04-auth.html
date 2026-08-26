@@ -1,0 +1,1316 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Authentication & Authorization &middot; Backend Principles</title>
+<meta name="description" content="Notes on authentication and authorization: sessions, JWTs and cookies, stateful vs stateless auth, API keys, OAuth 2.0 and OIDC, RBAC, and timing attacks.">
+<script>
+  /* set theme before first paint to avoid a flash of the wrong colours */
+  (function () {
+    try {
+      var s = localStorage.getItem('bp-theme');
+      var t = s || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+
+<header class="topbar">
+  <button class="icon-btn hamburger" id="hamburger" aria-label="Toggle navigation" aria-expanded="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ notes</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="nav-scrim" id="nav-scrim"></div>
+
+<div class="shell">
+
+  <aside class="sidebar" id="sidebar">
+    <p class="sidebar-title">Lessons</p>
+    <ul class="nav-list" id="nav-list"></ul>
+    <div class="sidebar-note">
+      <strong>How to read these.</strong> Every lesson ends each major part with a
+      <em>Key takeaways</em> box. If you are revising, read only those first, then dive
+      back into whatever felt shaky.
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 04</p>
+      <h1>Authentication &amp; Authorization</h1>
+      <p class="lead">
+        Two questions, and the entire topic hangs off them.
+        <strong>Authentication</strong> answers <em>&ldquo;who are you?&rdquo;</em> &mdash; assigning an
+        identity to a subject in a given context. <strong>Authorization</strong> answers
+        <em>&ldquo;what can you do?&rdquo;</em> &mdash; the permissions and capabilities that identity
+        carries. Everything below is machinery for answering one or the other.
+      </p>
+      <div class="pills">
+        <span class="pill">history</span>
+        <span class="pill">sessions</span>
+        <span class="pill">JWT</span>
+        <span class="pill">cookies</span>
+        <span class="pill">stateful vs stateless</span>
+        <span class="pill">API keys</span>
+        <span class="pill">OAuth 2.0</span>
+        <span class="pill">OIDC</span>
+        <span class="pill">RBAC</span>
+        <span class="pill">timing attacks</span>
+      </div>
+    </header>
+
+    <div class="prose">
+
+      <div class="callout callout--key">
+        <div class="callout-label">The two-sentence summary</div>
+        <p>
+          <strong>Authentication</strong> is the process of finding the answer to &ldquo;who are you in
+          this context?&rdquo; &mdash; where the context might be a platform, an operating system, or
+          your phone. <strong>Authorization</strong> is the process of finding the answer to &ldquo;what
+          can you do in that context?&rdquo;
+        </p>
+      </div>
+
+      <h2>How we got here</h2>
+      <p>
+        Authentication has a long history, and knowing it makes the modern designs feel inevitable
+        rather than arbitrary.
+      </p>
+
+      <ul class="timeline">
+        <li>
+          <span class="tl-era">Pre-industrial</span>
+          <span class="tl-title">Implicit trust</span>
+          <p>
+            Authentication was intrinsic &mdash; identity was the same thing as recognition. A village
+            elder, already respected in the community, could vouch for a person; deals were sealed with
+            a handshake symbolising mutual recognition. Elementary, but it was a real form of auth,
+            based on <strong>human contextual trust</strong>.
+          </p>
+        </li>
+        <li>
+          <span class="tl-era">As populations grew</span>
+          <span class="tl-title">Implicit trust fails to scale</span>
+          <p>
+            Interactions extended beyond familiar circles. The respected elder is not respected in the
+            next village, let alone the next continent. This marked the beginning of the search for
+            <strong>explicit</strong> authentication &mdash; proof of identity that works without
+            personal acquaintance.
+          </p>
+        </li>
+        <li>
+          <span class="tl-era">Medieval</span>
+          <span class="tl-title">Wax seals &mdash; the first authentication tokens</span>
+          <p>
+            A seal bearing a unique pattern, pressed onto documents and agreements. These were the first
+            widely adopted authentication tokens: physical representations of identity relying on
+            <strong>something you have</strong>. They were also forgeable &mdash; arguably the first
+            recorded authentication bypass attacks &mdash; which pushed people towards watermarks,
+            encrypted codes in trade documents, and the beginnings of cryptographic thinking.
+          </p>
+        </li>
+        <li>
+          <span class="tl-era">Industrial revolution</span>
+          <span class="tl-title">Passphrases and shared secrets</span>
+          <p>
+            As machines advanced, so did communication. The telegraph became critical infrastructure,
+            and with it came the need to validate messages. Operators used pre-agreed passphrases
+            &mdash; an early form of shared secret, and effectively static passwords. The principle had
+            shifted from <em>something you have</em> to <strong>something you know</strong>.
+          </p>
+        </li>
+        <li>
+          <span class="tl-era">1961</span>
+          <span class="tl-title">CTSS, and the printed password file</span>
+          <p>
+            Researchers at MIT's Project MAC, working on the Compatible Time-Sharing System, introduced
+            passwords for multi-user systems &mdash; letting several users share one computer without
+            sharing each other's data. They stored those passwords in <strong>plain text</strong>. The
+            vulnerability became undeniable when someone printed the password file. That single
+            incident is the genesis of secure password storage.
+          </p>
+        </li>
+        <li>
+          <span class="tl-era">After CTSS</span>
+          <span class="tl-title">Hashing</span>
+          <p>
+            The philosophy that passwords must never be stored in plain text produced hashing: an
+            algorithm that takes plaintext and returns a fixed-length, irreversible representation.
+            Whether you feed it 3 characters or 100, the output length is constant for a given
+            algorithm, and the same input always produces the same output. Authentication began to align
+            with the core tenets of information security &mdash; confidentiality, integrity,
+            availability.
+          </p>
+        </li>
+        <li>
+          <span class="tl-era">1970s</span>
+          <span class="tl-title">Asymmetric cryptography</span>
+          <p>
+            An explosion of cryptographic research, driven by people like Whitfield Diffie and Martin
+            Hellman. The Diffie&ndash;Hellman key exchange introduced <strong>asymmetric
+            cryptography</strong>: two parties establishing a shared secret over an untrusted medium.
+            This became the backbone of every modern authentication protocol, and of public key
+            infrastructure (PKI). The same era produced <strong>Kerberos</strong>, which introduced
+            ticket-based authentication &mdash; a trusted third party issuing tickets that verify both
+            user and service. A direct precursor to token-based auth.
+          </p>
+        </li>
+        <li>
+          <span class="tl-era">1990s</span>
+          <span class="tl-title">Multi-factor authentication</span>
+          <p>
+            As the internet grew, plain username and password proved too weak against brute-force and
+            dictionary attacks. MFA combined the principles instead of choosing between them:
+            <strong>something you know</strong> (password, PIN), <strong>something you have</strong>
+            (smart card, OTP generator), <strong>something you are</strong> (fingerprint, retina).
+            Biometrics arrived as a breakthrough &mdash; pattern recognition on unique physical traits
+            &mdash; though it brought its own problems: false positives, false negatives, and template
+            security. Not a one-step solution either.
+          </p>
+        </li>
+        <li>
+          <span class="tl-era">21st century</span>
+          <span class="tl-title">Cloud, mobile, APIs</span>
+          <p>
+            Cloud computing, mobile devices and API-based architectures demanded frameworks none of the
+            above could provide. Out of that came the components we actually work with:
+            <strong>OAuth and OAuth 2.0</strong>, <strong>JWTs</strong>, <strong>zero-trust
+            architecture</strong>, and passwordless systems such as WebAuthn, which eliminate passwords
+            entirely in favour of key pairs held in hardware.
+          </p>
+        </li>
+        <li>
+          <span class="tl-era">Next</span>
+          <span class="tl-title">Candidates for the future</span>
+          <p>
+            <strong>Decentralised identity</strong> built on blockchain-style technology &mdash; early,
+            experimental, promising. <strong>Behavioural biometrics.</strong> And
+            <strong>post-quantum cryptography</strong>: the recognition that once quantum computers are
+            in common use they will break the algorithms &mdash; RSA and friends &mdash; whose
+            difficulty for today's hardware is the whole reason we feel safe. Post-quantum cryptography
+            is the search for algorithms that stay secure against them. Some already exist.
+          </p>
+        </li>
+      </ul>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>The arc runs: who vouches for you &rarr; what you hold &rarr; what you know &rarr; what
+              you are &rarr; what you can prove cryptographically.</li>
+          <li>Every step was forced by the previous one failing to scale or being broken.</li>
+          <li>Passwords are never stored in plain text. One printed file settled that in 1961.</li>
+        </ul>
+      </div>
+
+      <h2>Three primitives you need first</h2>
+      <p>
+        Sessions, JWTs and cookies come up constantly in everything that follows, so we introduce them
+        up front.
+      </p>
+
+      <h3>Sessions</h3>
+      <p>
+        HTTP was designed <strong>stateless</strong> (see <a href="01-http.html">Lesson 01</a>): every
+        request is an isolated interaction carrying everything the server needs, with no memory of past
+        exchanges. That was ideal for the early web &mdash; static pages, static images, content you
+        read and moved on from. Nobody needed continuity between requests.
+      </p>
+      <p>
+        Then the web became dynamic, and statelessness turned into a bottleneck. How does an
+        e-commerce site remember what is in your cart? How does a user stay logged in while navigating
+        between pages? Those questions are the beginning of <strong>stateful interactions</strong> on
+        the web, and sessions are the answer: a temporary, server-side context for each user.
+      </p>
+      <ol class="flow">
+        <li>
+          <span class="flow-actor">On login</span>
+          <span class="flow-title">The server creates a session</span>
+          <p>
+            It generates a unique <strong>session ID</strong> and stores it alongside the relevant user
+            data &mdash; role, name, cart items, whether they are authenticated &mdash; in a persistent
+            store. That store might be a database (file-based) or Redis (in-memory).
+          </p>
+        </li>
+        <li>
+          <span class="flow-actor">Back to the client</span>
+          <span class="flow-title">The session ID is sent as a cookie</span>
+          <p>
+            The unique key travels to the browser as a cookie. Every subsequent request automatically
+            includes it.
+          </p>
+        </li>
+        <li>
+          <span class="flow-actor">On each request</span>
+          <span class="flow-title">The server looks the session up</span>
+          <p>
+            It takes the session ID from the cookie and fetches the user's data from the store. The
+            server now effectively has memory.
+          </p>
+        </li>
+        <li>
+          <span class="flow-actor">Eventually</span>
+          <span class="flow-title">The session expires</span>
+          <p>
+            Sessions are short-lived. If the expiry is 15 minutes, then after 15 minutes the presented
+            session ID is dead and the server creates a fresh one. Round and round.
+          </p>
+        </li>
+      </ol>
+      <h4>How session storage evolved</h4>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Generation</th><th>Where sessions lived</th><th>Why it changed</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="nowrap"><strong>File-based</strong></td>
+              <td>Files on the server.</td>
+              <td>Simple, but did not scale as user counts grew.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>Database-backed</strong></td>
+              <td>A database table.</td>
+              <td>Faster lookups, and sessions survived server restarts.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>Distributed</strong></td>
+              <td>Redis or Memcached &mdash; in-memory stores.</td>
+              <td>In-memory means RAM rather than disk, so lookups are considerably faster than hitting
+                  a traditional database.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>We still use sessions today, for exactly the original purpose: giving the server memory.</p>
+
+      <h3>JWTs</h3>
+      <p>
+        By the mid-2000s web applications had become globally distributed systems, and stateful
+        sessions &mdash; effective as they are &mdash; became a bottleneck for two reasons:
+      </p>
+      <ul>
+        <li>
+          <strong>Memory.</strong> Retaining session data for millions or billions of users is a large,
+          costly overhead.
+        </li>
+        <li>
+          <strong>Replication.</strong> In a distributed architecture, one server may sit in one part of
+          the world and another on the opposite side. Synchronising session data across regions
+          introduces latency &mdash; delay in authenticating the user &mdash; and consistency problems.
+        </li>
+      </ul>
+      <p>
+        Developers wanted to <strong>offload state from the server</strong> without losing security or
+        integrity. JWTs, formalised in 2015, are a <strong>stateless</strong> mechanism for
+        transferring <em>claims</em> between two parties. The key innovation is that the token is
+        <strong>self-contained</strong>: it carries the user data and its own cryptographic signature,
+        Base64-encoded.
+      </p>
+
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span> A JWT &mdash; three dot-separated parts</div>
+<pre><code><span class="key">eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9</span>.<span class="str">eyJzdWIiOiIxMjM0NSIsIm5hbWUiOiJBYmhpc2hlayJ9</span>.<span class="num">SflKxwRJSMeKKF2QT4</span>
+<span class="c">&#94;&#94;&#94;&#94;&#94;&#94; header &#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94; &#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94; payload &#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94;&#94; &#94;&#94; signature &#94;&#94;</span></code></pre>
+      </div>
+      <div class="cards">
+        <div class="card">
+          <div class="card-kicker">Part 01</div>
+          <h4>Header</h4>
+          <p>Metadata about the token itself &mdash; principally the <strong>signing
+             algorithm</strong>, so the verifying server knows how the token was signed.</p>
+        </div>
+        <div class="card">
+          <div class="card-kicker">Part 02</div>
+          <h4>Payload</h4>
+          <p>The claims &mdash; the data you actually need. Conventional fields:</p>
+          <ul>
+            <li><code>sub</code> &mdash; the subject: the user's ID. Which ID is up to you: from your
+                database, from an auth provider, from any context. It is just a storage slot.</li>
+            <li><code>iat</code> &mdash; issued at: when the token was created.</li>
+            <li>Optional fields &mdash; <code>name</code>, <code>role</code> (admin, member, editor,
+                viewer), anything else you need.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-kicker">Part 03</div>
+          <h4>Signature</h4>
+          <p>
+            Proof that <em>you</em> issued this token and that it has not been tampered with. Produced
+            with a secret key only you hold. Change any byte of the payload and verification against
+            your secret fails &mdash; so you know immediately it is no longer a valid token.
+          </p>
+        </div>
+      </div>
+      <div class="callout callout--note">
+        <div class="callout-label">Try it yourself</div>
+        <p>
+          <a href="https://jwt.io" rel="noopener">jwt.io</a> decodes a token in the browser and shows
+          all three parts side by side. Worth pasting one in once so the structure stops being abstract.
+        </p>
+      </div>
+
+      <h4>What JWTs bought us</h4>
+      <div class="cards">
+        <div class="card">
+          <div class="card-kicker">Advantage 01</div>
+          <h4>Statelessness</h4>
+          <p>No server-side storage cost. Verification is a signature check, not a lookup &mdash;
+             lightweight, and it happens on every request.</p>
+        </div>
+        <div class="card">
+          <div class="card-kicker">Advantage 02</div>
+          <h4>Scalability</h4>
+          <p>
+            A cookie issued by one server is not much use to a server on another domain &mdash; a real
+            problem in microservice architectures. With JWTs, every service holds the shared secret and
+            can verify the token independently. Scale to any number of instances and none of them has to
+            worry about where the session lives.
+          </p>
+        </div>
+        <div class="card">
+          <div class="card-kicker">Advantage 03</div>
+          <h4>Portability</h4>
+          <p>
+            Lightweight, URL-friendly, Base64-encoded strings. They pass between systems easily, fit in
+            cookies, headers and URL values, and work in constrained storage.
+            <em>(They can also be put in localStorage &mdash; though you should not.)</em>
+          </p>
+        </div>
+      </div>
+
+      <h4>And the two problems they introduced</h4>
+      <div class="callout callout--danger">
+        <div class="callout-label">Problem 1 &mdash; theft</div>
+        <p>
+          Because a JWT is stateless there is no stored record the server consults to validate you. If
+          someone obtains your token they can impersonate you and act on your behalf. And there is no
+          way to invalidate that token before it expires &mdash; unless the server changes its secret.
+          Which invalidates <em>every</em> token, forcing <em>every</em> user on the platform to log in
+          again, all to revoke one.
+        </p>
+      </div>
+      <div class="callout callout--danger">
+        <div class="callout-label">Problem 2 &mdash; revocation</div>
+        <p>
+          If you need to revoke a specific user's access &mdash; compromised account, malicious activity
+          &mdash; you cannot. Stateless tokens give you no way to track a token's status; you simply
+          wait for it to expire.
+        </p>
+      </div>
+
+      <h4>The hybrid approach, and the honest objection to it</h4>
+      <p>
+        The usual answer is to combine statelessness with a little statefulness. Normally, a JWT flow
+        does <em>no</em> storage lookup: you verify the signature with your secret, read the user ID out
+        of the payload, done. In the hybrid approach you add one step &mdash; after verification
+        succeeds, check the token against a <strong>blacklist</strong> in your persistent store (a
+        database or Redis). That gives you the ability to temporarily block a user or revoke a
+        compromised session.
+      </p>
+      <div class="callout callout--warn">
+        <div class="callout-label">The obvious question</div>
+        <p>
+          If the whole point of a JWT was statelessness, and you are now doing a persistent-storage
+          lookup on every request anyway &mdash; why not use the stateful approach in the first place,
+          which gives you this for free and is generally considered more secure?
+        </p>
+        <p>
+          It is a fair objection, and it comes up constantly in the industry. There is no tidy answer;
+          it is a trade-off you make with your eyes open.
+        </p>
+      </div>
+      <div class="callout callout--tip">
+        <div class="callout-label">Practical advice</div>
+        <p>
+          For a medium-to-large system, do not agonise over these choices &mdash; use an auth provider.
+          Auth0, Clerk and others exist precisely so that the algorithm choice, the hashing, the
+          salting, the token strategy and every other part of building a secure auth system is
+          <em>their</em> problem.
+        </p>
+        <p>
+          That said: while you are <strong>learning</strong> backend engineering, implement your own
+          auth. Understand how the parts fit, what the trade-offs are, where the advantages and
+          disadvantages lie. Then in production, reach for a provider &mdash; unless you are genuinely
+          confident in your own workflows.
+        </p>
+      </div>
+
+      <h3>Cookies</h3>
+      <p>
+        A cookie is a way of storing a piece of information &mdash; any string, any value &mdash; in the
+        user's browser, <strong>from the server side</strong>. That last part is what makes it useful:
+        through the ordinary HTTP request&ndash;response flow, a server can put data in a client's
+        browser.
+      </p>
+      <p>
+        Browsers enforce a nice security property here: a cookie set by one server is only accessible to
+        that server. One server cannot read another's cookies. And a cookie set by a server is
+        <strong>automatically included in every subsequent request to that server</strong>.
+      </p>
+      <ol class="flow">
+        <li>
+          <span class="flow-actor">Client</span>
+          <span class="flow-title">Authenticates with username and password</span>
+        </li>
+        <li>
+          <span class="flow-actor">Server</span>
+          <span class="flow-title">On success, sets a cookie</span>
+          <p>Containing an authorization token &mdash; a JWT, a session ID, whatever the implementation
+             uses.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Browser</span>
+          <span class="flow-title">Attaches it to every later request, automatically</span>
+          <p>Chrome, Firefox, Safari &mdash; all of them. No client code required.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Server</span>
+          <span class="flow-title">Validates the token and identifies the user</span>
+        </li>
+      </ol>
+      <div class="callout callout--key">
+        <div class="callout-label">Why cookies matter</div>
+        <p>
+          Cookies <strong>automate</strong> the round trip &mdash; server sends the token to the client,
+          client returns it on every request &mdash; entirely from the server side. That is the part to
+          hold on to.
+        </p>
+      </div>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>Sessions give a stateless protocol memory, at the cost of a store to keep it in.</li>
+          <li>JWTs move that state into a signed, self-contained token &mdash; buying scale, losing
+              revocation.</li>
+          <li>Cookies are the transport that makes either one automatic in a browser.</li>
+          <li>Set <code>HttpOnly</code> and <code>Secure</code> so JavaScript cannot read the cookie and
+              it only travels over HTTPS.</li>
+        </ul>
+      </div>
+
+      <h2>The four types of authentication</h2>
+      <p>
+        These are the ones you will meet as a backend engineer in day-to-day work.
+      </p>
+
+      <h3>1. Stateful authentication</h3>
+      <ol class="flow">
+        <li>
+          <span class="flow-actor">Client &rarr; Server</span>
+          <span class="flow-title">Send credentials</span>
+          <p>Username and password, or email and password &mdash; whatever the mechanism is.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Server</span>
+          <span class="flow-title">Validate, then create a session</span>
+          <p>
+            If the credentials are correct and the user is eligible, the server generates a
+            <strong>session ID</strong>, bundles it with the user's data, and stores the pair &mdash;
+            usually in Redis, because its read times beat a traditional database.
+          </p>
+        </li>
+        <li>
+          <span class="flow-actor">Server &rarr; Client</span>
+          <span class="flow-title">Return the session ID in an <code>HttpOnly</code> cookie</span>
+          <p><code>HttpOnly</code> means JavaScript cannot read the session ID at all.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Every request after</span>
+          <span class="flow-title">The cookie rides along automatically</span>
+          <p>
+            The server takes the session ID, checks that it exists in Redis, checks its expiry, reads the
+            user data, and identifies and authorizes the user. The API call proceeds.
+          </p>
+        </li>
+      </ol>
+      <p>
+        The session ID itself can be any cryptographically random string &mdash; or even a JWT. That is
+        an implementation detail.
+      </p>
+      <div class="compare">
+        <div class="compare-col compare-col--pro">
+          <h4>Pros</h4>
+          <ul>
+            <li><strong>Centralised control</strong> over every session.</li>
+            <li><strong>Real-time visibility</strong> &mdash; you know which sessions are active right
+                now, because you have a store to ask.</li>
+            <li><strong>Easy revocation</strong> &mdash; revoke a session, log a user out, at will.</li>
+            <li>Well suited to applications with moderate traffic and strict session requirements.</li>
+          </ul>
+        </div>
+        <div class="compare-col compare-col--con">
+          <h4>Cons</h4>
+          <ul>
+            <li>Limited scalability &mdash; the store is a shared dependency.</li>
+            <li>Higher operational complexity in distributed systems.</li>
+            <li>Latency when servers span multiple regions.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout callout--tip">
+        <div class="callout-label">An opinion worth hearing</div>
+        <p>
+          Most applications should probably go with stateful authentication &mdash; for the security
+          properties and for the sheer convenience of being able to revoke a token and see who is
+          logged in right now.
+        </p>
+      </div>
+
+      <h3>2. Stateless authentication</h3>
+      <ol class="flow">
+        <li>
+          <span class="flow-actor">Client &rarr; Server</span>
+          <span class="flow-title">Send credentials</span>
+        </li>
+        <li>
+          <span class="flow-actor">Server</span>
+          <span class="flow-title">Validate, then sign a JWT</span>
+          <p>
+            The server holds its own <strong>secret key</strong>, used to both sign and verify tokens.
+            It must be stored securely. The new token carries the user's ID, role, and whatever else is
+            needed.
+          </p>
+        </li>
+        <li>
+          <span class="flow-actor">Server &rarr; Client</span>
+          <span class="flow-title">Return the JWT</span>
+        </li>
+        <li>
+          <span class="flow-actor">Every request after</span>
+          <span class="flow-title">Client sends it in the <code>Authorization</code> header</span>
+          <p>
+            You can send it any way you like, but the standard is
+            <code>Authorization: Bearer &lt;token&gt;</code>.
+          </p>
+        </li>
+        <li>
+          <span class="flow-actor">Server</span>
+          <span class="flow-title">Verify the signature and read the identity</span>
+          <p>
+            No storage lookup. If verification succeeds the server knows the user's ID and the request
+            proceeds; otherwise it returns <code>401 Unauthorized</code> or <code>403 Forbidden</code>.
+          </p>
+        </li>
+      </ol>
+      <div class="callout callout--note">
+        <div class="callout-label">Why it earns the name</div>
+        <p>
+          In stateful auth you must consult a persistent store. In stateless auth everything you need is
+          <em>inside the signed token</em>, and the secret key is what proves it authentic. A
+          self-contained, self-sustaining credential.
+        </p>
+      </div>
+      <div class="compare">
+        <div class="compare-col compare-col--pro">
+          <h4>Pros</h4>
+          <ul>
+            <li>Scales freely &mdash; no session store dependency.</li>
+            <li>Ideal for distributed architectures.</li>
+            <li>Mobile-friendly, where cookies are awkward or absent.</li>
+          </ul>
+        </div>
+        <div class="compare-col compare-col--con">
+          <h4>Cons</h4>
+          <ul>
+            <li>Revocation is genuinely hard &mdash; once issued, a token lives until it expires.</li>
+            <li>A compromised account cannot be cut off on request without rotating the secret and
+                logging everyone out.</li>
+            <li>No real-time view of who is authenticated.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout callout--key">
+        <div class="callout-label">A pragmatic hybrid</div>
+        <p>
+          Split by client type. Your <strong>main web app</strong>, running in a browser, uses
+          <strong>stateful</strong> auth &mdash; you get revocation and visibility where it matters most.
+          Your <strong>mobile apps and third-party server integrations</strong> use
+          <strong>stateless</strong> auth &mdash; you get scale and simplicity where cookies are a
+          nuisance. Each side's weakness is covered by using it only where it is a strength.
+        </p>
+      </div>
+
+      <h3>3. API key authentication</h3>
+      <p>
+        This serves a completely different set of use cases from the two above. You visit a platform,
+        click &ldquo;generate an API key&rdquo;, and receive a cryptographically random string. That
+        string grants you <strong>direct, programmatic access to the server behind the UI</strong>.
+      </p>
+      <div class="callout callout--note">
+        <div class="callout-label">The example everyone recognises</div>
+        <p>
+          You type into ChatGPT's search bar and get a response. Somewhere in the cloud, many servers
+          produce that response and the client renders it nicely for you to read. That is the UI path.
+        </p>
+        <p>
+          But OpenAI also offers <strong>API keys</strong> &mdash; because plenty of people do not want
+          the UI. They want to build their own interface for their own use case, or they want the model's
+          response inside their own server, programmatically. API keys give access to the
+          <em>server</em>, not the platform &mdash; in a confined, permission-scoped, expiry-bound way.
+        </p>
+      </div>
+
+      <h4>Client-to-server vs machine-to-machine</h4>
+      <div class="cards cards--2">
+        <div class="card">
+          <div class="card-kicker">Interaction A</div>
+          <h4>Client to server</h4>
+          <p>
+            What we normally build. A human interacts visually &mdash; mouse, keyboard, a UI. The UI
+            sends programmatic requests, the server responds, the UI renders the result for the human to
+            read and act on. There is a <strong>human trigger</strong> at the start of it.
+          </p>
+        </div>
+        <div class="card">
+          <div class="card-kicker">Interaction B</div>
+          <h4>Machine to machine</h4>
+          <p>
+            My server has a UI, and a user types a paragraph and asks it to summarise. My server wants to
+            use ChatGPT's capabilities to do that. So <em>my server</em> calls <em>their server</em>,
+            using an API key, gets the summary back, and returns it to my UI. No UI on that hop, and
+            <strong>no human interaction</strong> anywhere in it.
+          </p>
+        </div>
+      </div>
+      <p>
+        This is precisely why API keys fit machine-to-machine work. A stateful or stateless login flow
+        needs a human trigger: a form to type into, a submission, a token to store. A machine has none of
+        that. Instead you give it one secret, it saves it in an environment variable or a secret store,
+        and it sends that on every request to identify itself. Much simpler for the shape of the problem.
+      </p>
+      <div class="compare">
+        <div class="compare-col compare-col--pro">
+          <h4>Good for</h4>
+          <ul>
+            <li>Trivial to generate &mdash; click a button and use it.</li>
+            <li>Server-to-server and machine-to-machine communication.</li>
+            <li>Single-purpose programmatic access to an API.</li>
+            <li>Per-key permissions, quotas and expiry, tracked server-side.</li>
+          </ul>
+        </div>
+        <div class="compare-col compare-col--con">
+          <h4>Watch out for</h4>
+          <ul>
+            <li>A long-lived secret in plain form &mdash; leak it and it is fully usable.</li>
+            <li>No user identity; the key <em>is</em> the identity.</li>
+            <li>Must be stored in environment variables or a secret manager, never in client code.</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>4. OAuth 2.0 and OpenID Connect</h3>
+      <p>
+        Everything so far has been a simple setup: create an account with a username and password, prove
+        it, get a token. The more platforms you use, the more credentials you have to create, remember
+        and maintain. Two problems followed:
+      </p>
+      <ul>
+        <li>
+          <strong>Security risk.</strong> Reusing passwords was extremely common &mdash;
+          <code>12345</code>, <code>password</code> &mdash; so one breach compromised many accounts.
+        </li>
+        <li>
+          <strong>Fatigue.</strong> The sheer number of accounts to manage was overwhelming.
+        </li>
+      </ul>
+
+      <h4>The delegation problem</h4>
+      <p>
+        Then a new class of problem appeared: <strong>one platform needing access to another
+        platform's resources</strong>.
+      </p>
+      <ul class="tight">
+        <li>A travel or hotel-booking app that wants to scan your Gmail for flight tickets,
+            programmatically.</li>
+        <li>A social media app that wants to import your contacts from another platform, or from Google
+            Contacts.</li>
+      </ul>
+      <p>
+        That is <strong>delegation</strong>: a user granting one platform programmatic access to their
+        resources on another platform.
+      </p>
+      <div class="callout callout--danger">
+        <div class="callout-label">The solution users actually reached for &mdash; and why it was a disaster</div>
+        <p>
+          They shared their passwords. Which meant:
+        </p>
+        <ul class="tight">
+          <li><strong>Full access to everything.</strong> No way to limit permissions to just the thing
+              you wanted to share.</li>
+          <li><strong>No way to revoke.</strong> Taking access back meant changing your password &mdash;
+              and since people reused passwords, changing it <em>everywhere</em>.</li>
+        </ul>
+      </div>
+
+      <h4>2007: OAuth &mdash; open authorization</h4>
+      <p>
+        Engineers from companies including Google and Twitter began standardising a way for users to
+        share access from one platform to another <strong>without sharing passwords</strong>. Their
+        answer: share <strong>tokens</strong> instead.
+      </p>
+      <div class="callout callout--key">
+        <div class="callout-label">Password vs token</div>
+        <p>
+          Give me your Google password and I can do anything: read your Photos, browse your Maps history,
+          see your Contacts, add to and delete from your Calendar. Everything.
+        </p>
+        <p>
+          Give me a <strong>token scoped to reading your contacts</strong> and I can read your contacts.
+          Not delete them. Not add to them. Nothing else, anywhere. Specific permission, for a specific
+          part, of a specific platform.
+        </p>
+      </div>
+
+      <h4>The four roles</h4>
+      <p>Using the example of a social media app wanting your Google contacts:</p>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Role</th><th>Who it is</th><th>In this example</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="nowrap"><strong>Resource owner</strong></td>
+              <td>The user who owns the data.</td>
+              <td>You.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>Client</strong></td>
+              <td>The app requesting access.</td>
+              <td>The social media app.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>Resource server</strong></td>
+              <td>Where the data lives.</td>
+              <td>Google's servers, holding your contacts.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>Authorization server</strong></td>
+              <td>Who authenticates the user and issues the token.</td>
+              <td>Google's authorization server.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>The OAuth 1.0 flow</h4>
+      <ol class="flow">
+        <li>
+          <span class="flow-actor">Client</span>
+          <span class="flow-title">Redirects the user to the authorization server</span>
+          <p>The social media app sends you to Google.</p>
+        </li>
+        <li>
+          <span class="flow-actor">User</span>
+          <span class="flow-title">Authenticates and grants permission</span>
+          <p>You log in <em>on Google</em>, and consent to the specific permissions being requested.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Authorization server</span>
+          <span class="flow-title">Sends a token to the client</span>
+          <p>Google issues the token to the social media app.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Client</span>
+          <span class="flow-title">Uses the token against the resource server</span>
+          <p>The app reads your contacts from Google &mdash; programmatically, without ever seeing your
+             password, and only within the permissions you granted.</p>
+        </li>
+      </ol>
+
+      <h4>2010: OAuth 2.0</h4>
+      <p>
+        OAuth 1.0 was revolutionary but had two practical limitations: the flow was
+        <strong>complicated for developers</strong> to implement, and it relied on
+        <strong>cryptographic signatures</strong>, which were error-prone. OAuth 2.0 addressed both:
+      </p>
+      <ul>
+        <li>
+          It introduced <strong>bearer tokens</strong> &mdash; far simpler across the whole flow. More
+          vulnerable in principle, but dramatically easier to implement correctly.
+        </li>
+        <li>
+          It let developers <strong>choose a flow based on the app type</strong>, rather than forcing one
+          shape on everything.
+        </li>
+      </ul>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Flow</th><th>Built for</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="nowrap"><strong>Authorization code</strong></td>
+              <td>Server-side apps.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>Implicit</strong></td>
+              <td>Browser-based apps. <em>Now discouraged, due to security risks.</em></td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>Client credentials</strong></td>
+              <td>Machine-to-machine &mdash; two servers talking, no user, no browser, no human.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>Device code</strong></td>
+              <td>Devices with limited input &mdash; no keyboard or mouse. Smart TV sign-in uses this.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>2014: OpenID Connect fills the gap</h4>
+      <div class="callout callout--warn">
+        <div class="callout-label">What OAuth did not solve</div>
+        <p>
+          OAuth was excellent at <strong>authorization</strong> &mdash; what you are permitted to do.
+          It did not solve <strong>authentication</strong> &mdash; who you actually are. Delegation was
+          handled; identity was not.
+        </p>
+      </div>
+      <p>
+        OpenID Connect (OIDC) was built on top of OAuth 2.0's security mechanisms to close that gap. Its
+        contribution is the <strong>ID token</strong> &mdash; which is, in practice, a JWT. It carries:
+      </p>
+      <ul class="tight">
+        <li>The user's ID.</li>
+        <li>When they logged in (via <code>iat</code>).</li>
+        <li>The <strong>issuing authority</strong> &mdash; which platform issued this token.</li>
+        <li>The user's name, email, and whatever profile information the requesting party asked for.</li>
+      </ul>
+      <p>
+        This is what &ldquo;Sign in with Google&rdquo;, &ldquo;Sign in with Facebook&rdquo; and
+        &ldquo;Sign in with Discord&rdquo; run on. The platform takes your identity &mdash; email, name,
+        profile picture &mdash; from Google, and either stores it or simply uses it to authenticate you,
+        <strong>without ever building its own authentication mechanism</strong>.
+      </p>
+
+      <h4>The OIDC flow, end to end</h4>
+      <p>Say you open a note-taking app and click &ldquo;Sign in with Google&rdquo;.</p>
+      <ol class="flow">
+        <li>
+          <span class="flow-actor">Client</span>
+          <span class="flow-title">Redirects you to the authorization server</span>
+          <p>The note-taking app sends you to Google.</p>
+        </li>
+        <li>
+          <span class="flow-actor">User</span>
+          <span class="flow-title">Logs in on Google and grants the requested permissions</span>
+          <p>
+            You authenticate against <em>Google's</em> authorization server, not the app's, and consent
+            to what it asked for &mdash; your email, your name, your profile picture, perhaps access to
+            your Google Keep notes.
+          </p>
+        </li>
+        <li>
+          <span class="flow-actor">Authorization server</span>
+          <span class="flow-title">Returns an authorization code (and optionally an ID token)</span>
+          <p>Back to the note-taking app.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Client</span>
+          <span class="flow-title">Exchanges the code for an access token</span>
+          <p>
+            The app trades the authorization code for an <strong>access token</strong> &mdash; and an
+            <strong>ID token</strong>, if it did not already get one. The ID token is the JWT holding
+            your identity: your ID, your name, your details.
+          </p>
+        </li>
+        <li>
+          <span class="flow-actor">Client</span>
+          <span class="flow-title">Acts on your behalf, within scope</span>
+          <p>
+            With the access token stored, the note-taking server can now fetch all your Google Keep notes
+            from Google's servers on your behalf. It can appear as you to Google &mdash; but
+            <strong>only for the things you granted</strong>. Nothing else.
+          </p>
+        </li>
+      </ol>
+      <div class="callout callout--key">
+        <div class="callout-label">The right way to picture OAuth 2.0 and OIDC</div>
+        <p>
+          Think of them as the security guards, or the key-makers, of the digital age. They ensure that
+          no one &mdash; not a user, not a platform &mdash; gets more access than they need or than they
+          asked the user for in the first place. Together they turned the internet from
+          password-sharing chaos into a secure, interconnected system, and they are the reason we can
+          integrate one system into another at all.
+        </p>
+      </div>
+
+      <h3>Which one should you use?</h3>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Type</th><th>Use it for</th><th>Because</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="nowrap"><strong>Stateful</strong></td>
+              <td>Web app authentication &mdash; which is most SaaS products.</td>
+              <td>User-specific session data lives on the server, so you keep control, visibility and
+                  revocation.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>Stateless</strong></td>
+              <td>APIs and scalable systems with servers distributed worldwide.</td>
+              <td>The token carries the user's data, so no server needs a shared store.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>OAuth / OIDC</strong></td>
+              <td>Third-party integrations, and login via external providers.</td>
+              <td>Delegated, scoped access without password sharing &mdash; plus identity, from OIDC.</td>
+            </tr>
+            <tr>
+              <td class="nowrap"><strong>API keys</strong></td>
+              <td>Server-to-server and machine-to-machine, or single-purpose API access.</td>
+              <td>No human in the loop, so no login flow is needed &mdash; just one scoped secret.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout callout--tip">
+        <div class="callout-label">In practice</div>
+        <p>
+          When you are building APIs, you will spend most of your time in <strong>stateful and stateless
+          authentication</strong>. The other two are for specific situations you will recognise when you
+          meet them.
+        </p>
+      </div>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>Stateful = server remembers, you can revoke. Stateless = token remembers, you cannot.</li>
+          <li>API keys exist because machines have no hands to type a password with.</li>
+          <li>OAuth solved <em>delegation</em> by replacing shared passwords with scoped tokens.</li>
+          <li>OIDC added the missing <em>identity</em> layer on top, as an ID token that is a JWT.</li>
+          <li>A hybrid split &mdash; stateful for browsers, stateless for mobile and integrations &mdash;
+              is often the right answer.</li>
+        </ul>
+      </div>
+
+      <h2>Authorization</h2>
+      <p>
+        Not as vast a topic as authentication, but you need the shape of it. Recall the one-line
+        distinction: authentication is <em>who</em>, authorization is <em>what you may do</em>.
+      </p>
+
+      <h3>Why it had to be invented</h3>
+      <p>
+        Take a note-taking platform. A user logs in with valid credentials and can now create, update and
+        delete notes. Fine.
+      </p>
+      <p>
+        Now add a feature: deleting a note does not actually destroy it &mdash; it goes to a recycle bin.
+        The user can delete it permanently, or after 30 days it moves somewhere else automatically:
+        deleted for the user, but not gone from the database. Call that the <strong>dead zone</strong>.
+      </p>
+      <p>
+        As the creator of the platform, you want to inspect the dead zone programmatically through a
+        separate <strong>admin UI</strong>. So you need capabilities that ordinary users must not have.
+      </p>
+      <div class="callout callout--danger">
+        <div class="callout-label">The tempting bad solution</div>
+        <p>
+          Invent a random string &mdash; a god-mode string &mdash; and send it with each admin API call.
+          The server recognises it and grants the extra capabilities.
+        </p>
+        <p><strong>Two things go wrong.</strong></p>
+        <ul class="tight">
+          <li>
+            <strong>Security.</strong> That string is travelling in your API calls. Anyone who intercepts
+            it can wipe the database, tamper with other users' data &mdash; anything.
+          </li>
+          <li>
+            <strong>It does not extend.</strong> Want to give the same access to a friend who helps
+            maintain the platform? Either hand them the same string, or mint more strings and teach the
+            server about each one. The system is now more complicated, harder to manage and more exposed
+            than before.
+          </li>
+        </ul>
+      </div>
+      <div class="callout callout--key">
+        <div class="callout-label">Which is to say</div>
+        <p>
+          <strong>Granting specific permissions to specific users is authorization.</strong> Not every
+          user has the same level of access &mdash; some have more capabilities, some fewer, some an
+          entirely different set. And if you are building multi-tenant software, where users create
+          organisations and admins assign read or write permission to individual members, you need this
+          to be a first-class part of the design rather than a pile of magic strings.
+        </p>
+      </div>
+
+      <h3>RBAC &mdash; role-based access control</h3>
+      <p>
+        The most widely used answer, and the one to be familiar with. It works exactly as the name says:
+        the platform defines <strong>roles</strong>, and each role is assigned a set of
+        <strong>permissions</strong> over particular <strong>resources</strong>.
+      </p>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr><th>Role</th><th>Notes resource</th><th>Dead zone resource</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>user</strong></td>
+              <td>read, write, delete <em>(own notes)</em></td>
+              <td>&mdash; no access</td>
+            </tr>
+            <tr>
+              <td><strong>moderator</strong></td>
+              <td>read, write</td>
+              <td>read</td>
+            </tr>
+            <tr>
+              <td><strong>admin</strong></td>
+              <td>read, write, delete</td>
+              <td>read, purge</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        You can define your own custom roles with their own permission sets, and go as granular as you
+        need &mdash; per role, per permission, per resource.
+      </p>
+
+      <h4>How it runs in a request</h4>
+      <ol class="flow">
+        <li>
+          <span class="flow-actor">Sign-up</span>
+          <span class="flow-title">The server assigns a role</span>
+          <p>A <code>user</code> role by default, or something else depending on the use case.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Each request</span>
+          <span class="flow-title">The client sends its credential</span>
+          <p>A session ID for stateful auth, a JWT for stateless auth &mdash; whatever the mechanism.</p>
+        </li>
+        <li>
+          <span class="flow-actor">Entry point</span>
+          <span class="flow-title">The server deduces the role</span>
+          <p>
+            Either straight out of the token, or with a database lookup. It then <strong>attaches that
+            information to the request</strong> so the code that runs next can see it. (We cover
+            middleware chains in a later lesson; for now, picture the first thing the request touches
+            establishing identity and role.)
+          </p>
+        </li>
+        <li>
+          <span class="flow-actor">Downstream</span>
+          <span class="flow-title">Later logic decides</span>
+          <p>
+            Can this request read the dead-zone notes? Yes if the role is <code>admin</code>. If the role
+            is <code>user</code>, the API fails and the server returns
+            <code>403 Forbidden</code> &mdash; you do not have permission to perform this action or
+            access this resource.
+          </p>
+        </li>
+      </ol>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>Authorization exists because not all authenticated users are equal.</li>
+          <li>RBAC: roles &rarr; permissions &rarr; resources. Custom roles as granular as you like.</li>
+          <li>Resolve the role early in the request, attach it, and let downstream logic branch on it.</li>
+          <li>The refusal is <code>403</code>, not <code>401</code> &mdash; you know who they are.</li>
+        </ul>
+      </div>
+
+      <h2>Two security details that catch people out</h2>
+      <p>
+        Since this is authentication in a backend context, two things are worth knowing before you write
+        any of it.
+      </p>
+
+      <h3>1. Never send helpful error messages</h3>
+      <p>
+        During authentication you will be tempted to be helpful. The user logs in with an email you
+        cannot find, so you return &ldquo;user not found&rdquo;. The email exists but the password is
+        wrong, so you return &ldquo;incorrect password&rdquo;. They fail a few times, so you return
+        &ldquo;account locked due to too many failed attempts&rdquo;.
+      </p>
+      <p>
+        These messages are helpful to legitimate users. They are also <strong>clues for
+        attackers</strong>:
+      </p>
+      <div class="cards cards--2">
+        <div class="card">
+          <div class="card-kicker">Leak 01</div>
+          <h4>&ldquo;User not found&rdquo;</h4>
+          <p>
+            The attacker now knows this username does not exist. They cross it off and move to the next
+            one on their list &mdash; you have just helped them enumerate your users.
+          </p>
+        </div>
+        <div class="card">
+          <div class="card-kicker">Leak 02</div>
+          <h4>&ldquo;Incorrect password&rdquo;</h4>
+          <p>
+            The attacker now knows the username <em>is</em> correct. Only the password remains, so they
+            point brute-force or dictionary attacks at it. You have narrowed their attack surface for
+            them.
+          </p>
+        </div>
+      </div>
+      <div class="callout callout--tip">
+        <div class="callout-label">The rule</div>
+        <p>
+          Keep every authentication message <strong>generic</strong>. One string &mdash;
+          <code>Authentication failed</code> &mdash; for all cases, regardless of what actually went
+          wrong. The attacker is left with no idea what to try next.
+        </p>
+        <p>
+          This applies <em>specifically</em> to the authentication lifecycle. Elsewhere &mdash;
+          validation errors, ordinary API responses &mdash; be as user-friendly as you like.
+        </p>
+      </div>
+
+      <h3>2. Timing attacks</h3>
+      <p>
+        Rarer, but real. Consider what a login handler actually does, in order:
+      </p>
+      <ol class="flow">
+        <li>
+          <span class="flow-actor">Step 1</span>
+          <span class="flow-title">Find the user</span>
+          <p>Look up the provided email or username. Does this user exist?</p>
+        </li>
+        <li>
+          <span class="flow-actor">Step 2</span>
+          <span class="flow-title">Check whether the account is locked</span>
+          <p>
+            Many servers lock an account for two minutes, four minutes, a day, after too many failed
+            attempts.
+          </p>
+        </li>
+        <li>
+          <span class="flow-actor">Step 3</span>
+          <span class="flow-title">Compare the password against the stored hash</span>
+          <p>
+            Passwords are never stored in plain text. On sign-up the password is hashed into a
+            cryptographically safe string and only the hash is stored &mdash; there is no way to recover
+            the plaintext, not even for the server. So to check a login, the server hashes the submitted
+            password with the same algorithm, fetches the stored hash, and compares the two.
+          </p>
+        </li>
+      </ol>
+      <div class="callout callout--danger">
+        <div class="callout-label">The leak</div>
+        <p>
+          If the username is invalid, the handler terminates at <strong>step 1</strong> &mdash; fast. If
+          the username is valid but the password is wrong, it runs all the way through
+          <strong>step 3</strong>, and hashing is comparatively expensive, so the response is
+          <em>measurably slower</em>.
+        </p>
+        <p>
+          An attacker who measures that difference &mdash; 200&nbsp;ms, whatever it is &mdash; learns
+          which of the two failed, even though your error message said nothing. They now know whether to
+          attack the username or the password, and can strategise accordingly.
+        </p>
+      </div>
+      <h4>Two defences</h4>
+      <div class="cards cards--2">
+        <div class="card">
+          <div class="card-kicker">Defence 01</div>
+          <h4>Constant-time comparison</h4>
+          <p>
+            Use the cryptographically secure constant-time comparison functions your platform provides
+            for password hashes. Their execution time does not vary with how similar the inputs are, so
+            there is nothing to measure.
+          </p>
+        </div>
+        <div class="card">
+          <div class="card-kicker">Defence 02</div>
+          <h4>Equalise the response time</h4>
+          <p>
+            Simulate the missing work. In Node that is a <code>setTimeout</code>; in Go a
+            <code>time.Sleep</code>. Even when the username does not match, do not answer instantly
+            &mdash; add a deliberate delay so the fast path and the slow path look identical from
+            outside.
+          </p>
+        </div>
+      </div>
+      <div class="callout callout--key">
+        <div class="callout-label">The principle behind both</div>
+        <p>
+          An authentication system must <strong>equalise its response times</strong>. Anything an
+          attacker can measure is something you are telling them.
+        </p>
+      </div>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>One generic failure message for the entire auth lifecycle. No exceptions.</li>
+          <li>Timing is a side channel &mdash; a fast rejection reveals which check failed.</li>
+          <li>Use constant-time comparison, and pad the fast path so both paths take the same time.</li>
+        </ul>
+      </div>
+
+      <h2>Where that leaves us</h2>
+      <p>
+        Authentication answers <em>who are you</em>; authorization answers <em>what can you do</em>.
+        Between them sit sessions, JWTs and cookies as primitives; stateful, stateless, API-key and
+        OAuth/OIDC as strategies; RBAC as the standard way to express permissions; and two quiet
+        security details &mdash; generic errors and equal response times &mdash; that separate a
+        working implementation from a safe one.
+      </p>
+      <div class="callout callout--tip">
+        <div class="callout-label">Coming next</div>
+        <p>Validations and transformations.</p>
+      </div>
+
+    </div>
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; course notes. Built as a static site, no dependencies.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+  <nav class="toc" aria-label="On this page">
+    <p class="toc-title">On this page</p>
+    <ul id="toc-list"></ul>
+  </nav>
+
+</div>
+
+<div class="palette-backdrop" id="palette" role="dialog" aria-modal="true" aria-label="Search">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="text" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>
