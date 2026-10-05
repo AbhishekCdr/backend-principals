@@ -6,13 +6,13 @@
 <title>Understanding HTTP &middot; Backend Principles</title>
 <meta name="description" content="Notes on HTTP for backend engineers: statelessness, the client-server model, headers, methods, CORS, status codes, caching, content negotiation and TLS.">
 <script>
-  /* set theme before first paint to avoid a flash of the wrong colours */
   (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     try {
-      var s = localStorage.getItem('bp-theme');
-      var t = s || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-      document.documentElement.setAttribute('data-theme', t);
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
     } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
   })();
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -21,14 +21,12 @@
 <link rel="stylesheet" href="../assets/css/main.css">
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 
 <header class="topbar">
-  <button class="icon-btn hamburger" id="hamburger" aria-label="Toggle navigation" aria-expanded="false">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
-  </button>
   <a class="brand" href="../index.html">
     <span class="brand-mark">bp</span>
-    <span class="brand-text">Backend Principles <span>/ notes</span></span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
   </a>
   <div class="topbar-spacer"></div>
   <div class="topbar-crumb" id="crumb"></div>
@@ -41,21 +39,24 @@
   <div class="progress" id="progress"></div>
 </header>
 
-<div class="nav-scrim" id="nav-scrim"></div>
-
 <div class="shell">
 
-  <aside class="sidebar" id="sidebar">
-    <p class="sidebar-title">Lessons</p>
-    <ul class="nav-list" id="nav-list"></ul>
-    <div class="sidebar-note">
-      <strong>How to read these.</strong> Every lesson ends each major part with a
-      <em>Key takeaways</em> box. If you are revising, read only those first, then dive
-      back into whatever felt shaky.
-    </div>
-  </aside>
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
 
-  <main class="main">
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
     <header class="lesson-head">
       <p class="eyebrow">Lesson 01</p>
       <h1>Understanding HTTP</h1>
@@ -65,17 +66,6 @@
         <strong>overwhelming majority of codebases</strong> &mdash; and nothing shows up more often
         than HTTP: the medium through which browsers talk to servers.
       </p>
-      <div class="pills">
-        <span class="pill">statelessness</span>
-        <span class="pill">client&ndash;server</span>
-        <span class="pill">headers</span>
-        <span class="pill">methods</span>
-        <span class="pill">CORS</span>
-        <span class="pill">status codes</span>
-        <span class="pill">caching</span>
-        <span class="pill">compression</span>
-        <span class="pill">TLS</span>
-      </div>
     </header>
 
     <div class="prose">
@@ -255,6 +245,15 @@
         </p>
       </div>
 
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>HTTP is an application-layer protocol; the transport carries its messages.</li>
+          <li>HTTP/1.1 reuses TCP connections; HTTP/2 multiplexes streams over TCP.</li>
+          <li>HTTP/3 uses QUIC over UDP, avoiding TCP's cross-stream head-of-line blocking.</li>
+        </ul>
+      </div>
+
       <h2>Anatomy of an HTTP message</h2>
       <p>
         A <strong>request message</strong> is what the client sends. A <strong>response message</strong>
@@ -304,6 +303,15 @@
         <li>On the response side, a <strong>status code and reason phrase</strong> replace the
             method/URL line: <code>200</code> means OK.</li>
       </ul>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>An HTTP/1.1 request has a method, request target and version; a response starts with a status line.</li>
+          <li>Headers carry metadata. A blank line separates headers from the optional body.</li>
+          <li><code>Content-Type</code> describes the representation carried in the body.</li>
+        </ul>
+      </div>
 
       <h2>HTTP headers</h2>
       <p>
@@ -1195,6 +1203,15 @@
         should know is there.
       </p>
 
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li><code>Accept</code>, <code>Accept-Language</code> and <code>Accept-Encoding</code> communicate client preferences.</li>
+          <li><code>Content-Type</code> and <code>Content-Encoding</code> describe the actual response.</li>
+          <li>Compression reduces transferred bytes; decompression restores the original content.</li>
+        </ul>
+      </div>
+
       <h2>Persistent connections and keep-alive</h2>
       <p>
         In HTTP/1.0 every request&ndash;response cycle needed its own connection, and establishing and
@@ -1223,6 +1240,15 @@
       <div class="callout callout--note">
         <div class="callout-label">Practical note</div>
         <p>You usually will not touch any of this. The defaults are fine.</p>
+      </div>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>HTTP/1.1 connections are persistent by default, reducing connection setup overhead.</li>
+          <li><code>Connection: close</code> asks to close an HTTP/1.1 connection after the response.</li>
+          <li>Reusing a connection does not make HTTP stateful: application sessions are separate.</li>
+        </ul>
       </div>
 
       <h2>Large requests and large responses</h2>
@@ -1283,13 +1309,9 @@ data: chunk 3&hellip;</code></pre>
       <div class="keytakeaways">
         <h4>Key takeaways</h4>
         <ul>
-          <li>Client preferences travel in <code>Accept*</code> headers; the server answers with
-              <code>Content-Type</code> / <code>Content-Encoding</code>.</li>
-          <li>gzip took a 26&nbsp;MB response down to 3.8&nbsp;MB. Compression is not optional at
-              scale.</li>
-          <li>HTTP/1.1 keeps connections alive by default; you rarely need to intervene.</li>
-          <li>Uploads: <code>multipart/form-data</code> with a <code>boundary</code> delimiter.</li>
-          <li>Large downloads: <code>text/event-stream</code> plus <code>keep-alive</code>.</li>
+          <li><code>multipart/form-data</code> separates form fields and files with a boundary delimiter.</li>
+          <li>Streaming lets a response be consumed incrementally without buffering the entire payload.</li>
+          <li><code>text/event-stream</code> is for server-sent events; ordinary file downloads can stream too.</li>
         </ul>
       </div>
 
@@ -1326,6 +1348,15 @@ data: chunk 3&hellip;</code></pre>
         </p>
       </div>
 
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>SSL is obsolete; TLS provides encryption, integrity and peer authentication in transit.</li>
+          <li>HTTPS carries HTTP securely using TLS; certificate validation authenticates the server.</li>
+          <li>Transport security does not replace application authentication or authorization.</li>
+        </ul>
+      </div>
+
       <h2>Where that leaves us</h2>
       <p>
         That is a lot of ground. There is always more to read on HTTP, TLS and TCP &mdash; but to work
@@ -1334,8 +1365,8 @@ data: chunk 3&hellip;</code></pre>
         through it, and debug most of what goes wrong &mdash; because you now know which pieces come
         into play, and when.
       </p>
-      <div class="callout callout--key">
-        <div class="callout-label">If you remember five things</div>
+      <div class="keytakeaways">
+        <h4>If you remember five things</h4>
         <ul class="tight">
           <li>HTTP is stateless; every request stands alone, and the client always speaks first.</li>
           <li>Headers are the remote control &mdash; metadata that changes the whole interaction.</li>
@@ -1349,23 +1380,20 @@ data: chunk 3&hellip;</code></pre>
     <nav class="pager" id="pager"></nav>
 
     <footer class="foot">
-      Backend Principles &mdash; course notes. Built as a static site, no dependencies.
+      Backend Principles &mdash; a study guide for curious engineers.
       &copy; <span id="year"></span>
     </footer>
   </main>
 
-  <nav class="toc" aria-label="On this page">
-    <p class="toc-title">On this page</p>
-    <ul id="toc-list"></ul>
-  </nav>
 
 </div>
 
-<div class="palette-backdrop" id="palette" role="dialog" aria-modal="true" aria-label="Search">
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
   <div class="palette">
     <div class="palette-input-wrap">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="palette-input" type="text" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
     </div>
     <div class="palette-results" id="palette-results"></div>
     <div class="palette-foot">
@@ -1374,7 +1402,7 @@ data: chunk 3&hellip;</code></pre>
       <span><span class="kbd">esc</span> close</span>
     </div>
   </div>
-</div>
+</dialog>
 
 <script src="../assets/js/app.js"></script>
 </body>

@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layers, Middleware &amp; Request Context &middot; Backend Principles</title>
+<meta name="description" content="Follow the internal request lifecycle through handlers, services, repositories, middleware ordering, error handling and request context, with examples of verified identity, tracing and cancellation.">
+<script>
+  (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try {
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell">
+
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 06</p>
+      <h1>Layers, Middleware &amp; Request Context</h1>
+      <p class="lead">
+        What happens inside the server between receiving a request and sending a response?
+        <strong>Handlers, services and repositories</strong> divide the work,
+        <strong>middleware</strong> handles recurring steps, and <strong>request context</strong>
+        carries information through the journey. These three ideas fit together in one request lifecycle.
+      </p>
+    </header>
+
+    <div class="prose">
+      <h2>The request lifecycle inside a server</h2>
+      <p>
+        Earlier lessons followed HTTP across the network, matched routes, decoded payloads and
+        validated input. Now connect those pieces to the application that processes the request.
+        The server listens on a port; its HTTP implementation reads the incoming message and
+        exposes it to application code. A router matches the method and path to a handler.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>A simplified successful request</div>
+        <pre><code>Client → HTTP server → middleware → route → handler
+                                             ↓
+                                          service
+                                             ↓
+                                         repository ↔ database
+                                             ↓
+Client ← HTTP response ← handler ← service ← result</code></pre>
+      </div>
+      <p>
+        Middleware can also be attached to individual routes. Some requests finish early, such as
+        an authentication failure; some services never need a database. The diagram is a common
+        path, not a requirement that every request visits every component.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Component</th><th>Main question it answers</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Handler / controller</strong></td><td>How does this HTTP request become an application operation, and how is its result returned?</td></tr>
+          <tr><td><strong>Service</strong></td><td>What business operation must happen, and which rules apply?</td></tr>
+          <tr><td><strong>Repository</strong></td><td>How do we read or change persistent data?</td></tr>
+          <tr><td><strong>Middleware</strong></td><td>Which shared request/response processing should run here?</td></tr>
+          <tr><td><strong>Request context</strong></td><td>Which information and signals belong to this particular request?</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout callout--note">
+        <div class="callout-label">A pattern, not a mandatory folder structure</div>
+        <p>A small application can do everything in one handler. Separate responsibilities when it
+          helps you understand, test and change the code. Three layers do not require three services,
+          three processes or a collection of empty wrapper classes.</p>
+      </div>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>The internal lifecycle runs from HTTP input through application work to an HTTP response.</li>
+        <li>Handler = HTTP boundary; service = business operation; repository = persistence.</li>
+        <li>Middleware adds shared processing; context carries information scoped to one request.</li>
+      </ul></div>
+
+      <h2>Handlers and controllers: the HTTP boundary</h2>
+      <p>
+        A handler is the function responsible for a matched route. A controller often groups related
+        handlers. Keep HTTP concerns here so the rest of the application can work with ordinary data.
+        Frameworks may provide request/response objects, a combined context object, or a request
+        argument with a returned response; the exact signature is not universal.
+      </p>
+      <ol class="flow">
+        <li><span class="flow-actor">1. Extract</span><span class="flow-title">Read the route's inputs</span>
+          <p>Collect the required path parameters, query parameters, headers and body. These sources
+            come from the endpoint's contract: a POST can have query parameters as well as a body.</p></li>
+        <li><span class="flow-actor">2. Bind</span><span class="flow-title">Decode into native values</span>
+          <p>Turn JSON text into an object, dictionary or struct. Binding maps decoded fields into
+            the application's input representation. Malformed JSON usually produces a 400 response.</p></li>
+        <li><span class="flow-actor">3. Check</span><span class="flow-title">Validate and transform</span>
+          <p>Check required fields, types, formats and ranges. Apply deliberate conversions and defaults,
+            then use the resulting validated values. Reject bad input before business side effects.</p></li>
+        <li><span class="flow-actor">4. Delegate</span><span class="flow-title">Call the service</span>
+          <p>Pass application input and the verified caller identity needed by the use case, along with
+            cancellation or tracing information where appropriate.</p></li>
+        <li><span class="flow-actor">5. Respond</span><span class="flow-title">Map the result back to HTTP</span>
+          <p>Select the response status, headers and public response fields. Serialize the result,
+            or delegate a failure to the application's central HTTP error handler.</p></li>
+      </ol>
+      <p>
+        Parsing may already happen in middleware or framework binding. This is a framework choice,
+        not a rule that JavaScript is automatic while Go or Python must always parse inside a handler.
+        Successfully decoding JSON also does not prove that it satisfies your API's schema.
+      </p>
+      <h3>Defaults make downstream input predictable</h3>
+      <p>
+        Suppose <code>GET /books</code> accepts an optional <code>sort</code> parameter with values
+        <code>name</code> or <code>date</code>. Validate the supplied value and choose <code>date</code>
+        when it is absent. The service now receives an explicit sort choice every time.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Request</th><th>Application input</th></tr></thead>
+        <tbody>
+          <tr><td><code>GET /books</code></td><td><code>{ sort: "date" }</code> — documented default.</td></tr>
+          <tr><td><code>GET /books?sort=name</code></td><td><code>{ sort: "name" }</code> — accepted choice.</td></tr>
+          <tr><td><code>GET /books?sort=unknown</code></td><td>Validation error — an invalid supplied value is not a missing value.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Optional filters and sorting controls often make an API easier to use. Required query
+        parameters are still valid when the operation needs them. Likewise, transformation can
+        precede a check when explicit parsing is needed, as with a numeric query string.
+        See <a href="05-validation.html">Validations &amp; Transformations</a> for the full pipeline.
+      </p>
+      <h3>Success still needs a response</h3>
+      <p>
+        Typical choices include <code>200 OK</code> for a successful read and <code>201 Created</code>
+        for creation. DELETE does not always require 204: it can return <code>200</code> with a result,
+        <code>202</code> for accepted but unfinished work, or <code>204 No Content</code> when completed
+        without a response body. A 204 is still an HTTP response. DELETE request bodies have no
+        generally defined semantics; an identifier in the target URL is usually clearer.
+        <a href="https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.5">HTTP specification: DELETE</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Extract → bind/decode → validate/transform → call service → map and send the response.</li>
+        <li>Parsing may run upstream; input validation still has to happen.</li>
+        <li>Default missing optional values deliberately; reject supplied values that violate the contract.</li>
+        <li>HTTP status codes, headers and response serialization belong at the HTTP boundary.</li>
+      </ul></div>
+
+      <h2>Services: business rules and orchestration</h2>
+      <p>
+        A service implements a use case such as creating a book, listing a user's bookmarks or
+        sending a notification. It takes application data, applies the relevant business rules,
+        coordinates the work and returns a result or an application error.
+      </p>
+      <p>
+        One service method can call several repositories, combine their results, contact another
+        service and arrange an email. Another might only send an email and never access a database.
+        This coordination is called <strong>orchestration</strong>.
+      </p>
+      <div class="cards cards--2">
+        <div class="card"><h4>What belongs here</h4><p>Resource ownership checks, account limits,
+          business decisions, transaction boundaries and the sequence of repository or external-service calls.</p></div>
+        <div class="card"><h4>What belongs at the HTTP boundary</h4><p>Reading raw headers, decoding an HTTP
+          body, choosing a status code, setting response cookies and sending JSON to the client.</p></div>
+      </div>
+      <p>
+        Keeping services independent of HTTP lets a command-line tool, a scheduled job and an API
+        reuse the same business operation. Independent of HTTP does not mean free of side effects:
+        a service can absolutely write data or send messages.
+      </p>
+      <div class="callout callout--key">
+        <div class="callout-label">Validation does not end at the controller</div>
+        <p>A valid book ID does not prove that the caller owns that book. A valid order quantity does
+          not prove that stock is available. Services enforce these domain rules and authorization
+          checks, with database constraints or transactions where consistency requires them.</p>
+      </div>
+      <p>
+        If several writes must succeed together, coordinate a transaction. An external email cannot
+        be rolled back by the database; decide when it should run and how a failure or retry should
+        behave. Splitting code into layers does not itself make a multi-step operation atomic.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>A service implements a business use case and may orchestrate multiple operations.</li>
+        <li>Pass application data and verified identity rather than raw HTTP request/response objects.</li>
+        <li>Keep domain rules and resource authorization here even when boundary validation passes.</li>
+        <li>Services can have side effects; transaction and retry behavior still need deliberate design.</li>
+      </ul></div>
+
+      <h2>Repositories: focused persistence operations</h2>
+      <p>
+        A repository hides the details of reading and changing stored data. It accepts identifiers,
+        filters or data to persist, constructs the database operation, and returns a predictable
+        result. The store could be relational, document-based or another persistence system.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Operation</th><th>Input</th><th>Result contract</th></tr></thead>
+        <tbody>
+          <tr><td><code>listBooks</code></td><td>Owner, filters, sort and pagination.</td><td>A collection of books, possibly empty.</td></tr>
+          <tr><td><code>findBookById</code></td><td>Book ID and any required access scope.</td><td>One book or an explicit not-found result.</td></tr>
+          <tr><td><code>createBook</code></td><td>Validated book fields and its owner ID.</td><td>The created record or identifier.</td></tr>
+          <tr><td><code>deleteBook</code></td><td>Book ID and any required access scope.</td><td>A defined result such as the number of affected records.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Avoid a method that returns a single book when an optional ID is present and an array when
+        it is absent. Different return shapes make every caller branch. Optional filters are fine
+        when the result contract stays stable. A focused operation may use joins or several queries;
+        it does not have to mean exactly one SQL statement.
+      </p>
+      <h3>Carry safe choices into the query</h3>
+      <p>
+        In the sorting example, map <code>name</code> and <code>date</code> to known database columns.
+        Do not paste arbitrary client text into an ORDER BY clause. Bind data values as query
+        parameters, and retain database constraints as the last line of data integrity.
+        The repository returns data or persistence failures; it does not decide HTTP response codes.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Repositories encapsulate persistence and expose focused operations with stable result shapes.</li>
+        <li>Separate collection queries from single-record lookups; optional filters are still useful.</li>
+        <li>Use bound values, allowlisted sort choices and database constraints.</li>
+        <li>The service coordinates repository calls; the HTTP boundary maps outcomes to responses.</li>
+      </ul></div>
+
+      <h2>Middleware: shared processing between steps</h2>
+      <p>
+        Authentication, logging and request parsing are needed by many endpoints. Repeating their
+        implementation in every handler creates duplication; even calling the same helper in every
+        handler makes it easy to forget one. Middleware attaches shared behavior to the request
+        pipeline, globally or for a selected group of routes.
+      </p>
+      <p>
+        Middleware can inspect input, attach metadata, prepare response headers, continue to the
+        next step, or finish the request immediately. For example, an invalid session can produce
+        a 401 before any book-creation logic runs.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Continue or finish early</div>
+        <pre><code>Request → authenticate
+            ├─ valid identity → attach identity → next step → handler
+            └─ invalid token  → 401 response → stop application work</code></pre>
+      </div>
+      <p>
+        In Express, middleware commonly receives <code>req</code>, <code>res</code> and
+        <code>next</code>. Calling <code>next()</code> continues the chain; <code>next(error)</code>
+        enters error handling. A middleware that neither responds nor continues leaves the request
+        hanging. Once it sends a final response, it should stop its own execution instead of
+        continuing into another response. Other frameworks may use wrappers or an awaited next
+        handler instead. <a href="https://expressjs.com/en/guide/using-middleware/">Express middleware guide</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Middleware centralizes recurring request/response work and can apply globally or per route.</li>
+        <li>Each step either continues processing or ends the request early.</li>
+        <li><code>req, res, next</code> is an Express-style interface, not a universal middleware signature.</li>
+        <li>Do not leave a request hanging or continue business work after sending an early error.</li>
+      </ul></div>
+
+      <h2>Common middleware responsibilities</h2>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Concern</th><th>What it does</th><th>Detail to remember</th></tr></thead>
+        <tbody>
+          <tr><td><strong>CORS</strong></td><td>Handles preflight requests and sets allowed-origin response headers.</td><td>A browser access policy; authentication is still required for protected resources.</td></tr>
+          <tr><td><strong>Security headers</strong></td><td>Adds suitable response policies consistently.</td><td>Choose policies for the content being served; CSP is especially relevant to HTML documents.</td></tr>
+          <tr><td><strong>Authentication</strong></td><td>Verifies a session or token and establishes a caller identity.</td><td>Missing or invalid credentials can stop a protected request with 401.</td></tr>
+          <tr><td><strong>Authorization</strong></td><td>Checks coarse route permissions, such as an admin-only endpoint.</td><td>A 403 can reject a known caller without permission; resource-specific checks remain necessary.</td></tr>
+          <tr><td><strong>Rate limiting</strong></td><td>Enforces a request budget per identity, API key or network source.</td><td>Excess requests can receive 429; IP-only limits can group many users together.</td></tr>
+          <tr><td><strong>Logging / monitoring</strong></td><td>Records request ID, method, route, outcome and duration.</td><td>Redact credentials and personal data; avoid dumping entire bodies and headers.</td></tr>
+          <tr><td><strong>Parsing / validation</strong></td><td>Decodes supported body formats and applies route-specific input rules.</td><td>Set size limits before consuming large payloads; do not use one schema for every endpoint.</td></tr>
+          <tr><td><strong>Compression</strong></td><td>Encodes eligible responses with a supported algorithm, such as gzip.</td><td>Negotiate with the client and set headers before the response is committed.</td></tr>
+          <tr><td><strong>Error handling</strong></td><td>Maps failures to consistent public responses.</td><td>Keep internal diagnostics in server logs rather than exposing them to clients.</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout callout--warn">
+        <div class="callout-label">CORS is not an API firewall</div>
+        <p>Missing CORS permission generally prevents browser JavaScript from reading a cross-origin
+          response. A simple request may still reach the server and cause side effects; a failed
+          preflight prevents the subsequent actual request. Non-browser clients do not enforce this
+          policy and can choose their own Origin header. Keep authentication, authorization and
+          appropriate CSRF defenses independent of CORS.
+          <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS">MDN: how CORS works</a>.</p>
+      </div>
+      <p>
+        Rate limits also depend on deployment details. Trust forwarded client-IP headers only from
+        configured proxies, and coordinate counters across instances when the limit must apply to
+        the whole service. A per-process counter is only a per-process limit.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Shared security checks, parsing, logging, compression and error mapping fit naturally in middleware.</li>
+        <li>CORS controls browser access to responses; it does not identify or authorize a caller.</li>
+        <li>Authentication establishes identity; authorization decides access; rate limiting controls volume.</li>
+        <li>Record enough to diagnose failures without logging passwords, tokens or unnecessary personal data.</li>
+      </ul></div>
+
+      <h2>Ordering and global error handling</h2>
+      <p>
+        Middleware order determines which information is available and which work runs before a
+        rejection. Start with dependencies rather than copying a universal sequence:
+      </p>
+      <ul>
+        <li>Create request IDs and start timing early enough to observe failures.</li>
+        <li>Apply cheap traffic and size limits before expensive processing.</li>
+        <li>Handle CORS preflight before middleware that demands user credentials.</li>
+        <li>Parse a body before middleware that reads its fields; verify identity before checking its permissions.</li>
+        <li>Validate endpoint input before business side effects. A login route and a protected resource route may need different chains.</li>
+        <li>Arrange response headers and compression before writing the body; record final outcome when the response finishes.</li>
+      </ul>
+      <h3>Placement depends on the execution model</h3>
+      <p>
+        Express-style error handlers are registered after the routes and middleware whose errors they
+        handle. Errors must reach that chain: asynchronous callbacks may need explicit forwarding,
+        while rejected promises depend on the framework's support. Also, returning from
+        <code>next()</code> does not generally mean an asynchronous response has finished.
+        <a href="https://expressjs.com/en/guide/error-handling/">Express error-handling guide</a>.
+      </p>
+      <p>
+        In an onion-style pipeline such as Koa, an outer middleware awaits the next one and resumes
+        on the way back out. An error boundary can wrap downstream work with a try/catch, so it is
+        placed outside that work rather than simply registered last. The principle is to cover the
+        operations that can fail using the framework's actual control flow.
+        <a href="https://koajs.com/#cascading">Koa's cascading middleware</a>.
+      </p>
+      <h3>Turn failures into a stable public contract</h3>
+      <p>
+        Use known application errors to distinguish invalid input, missing resources, denied access
+        and conflicts. Map those to appropriate 4xx responses. Unexpected failures receive a safe
+        5xx response and an internal diagnostic linked to the request ID. Not every failure is 400,
+        and a raw database error should not be sent to the client.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot dot--res"></span>Example public validation error</div>
+        <pre><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": {
+    "code": "INVALID_SORT",
+    "message": "sort must be name or date",
+    "requestId": "req-7f21"
+  }
+}</code></pre>
+      </div>
+      <p>
+        A central error handler only handles failures connected to its execution chain. It cannot
+        automatically catch unrelated background-job failures or process crashes. After response
+        headers or body bytes have been sent, it may also be too late to replace them with a new
+        JSON error response.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Order middleware by dependencies: parse before consuming input, authenticate before checking identity-based access.</li>
+        <li>Error handlers go after relevant middleware in Express; outer wrappers can catch downstream errors in onion-style pipelines.</li>
+        <li>Forward asynchronous errors correctly and observe response completion explicitly.</li>
+        <li>Return stable, safe error codes and messages; keep diagnostic details linked to a request ID in logs.</li>
+      </ul></div>
+
+      <h2>Request context: state scoped to one request</h2>
+      <p>
+        A request passes through many functions. Some information is useful across these boundaries:
+        who the caller is, which request this is and when its work should stop. A
+        <strong>request context</strong> carries that information for this one execution.
+        A middleware can establish it upstream and later handlers or services can read it.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Context value</th><th>Created or established by</th><th>Used by</th></tr></thead>
+        <tbody>
+          <tr><td>Verified user ID, roles or scopes</td><td>Authentication middleware.</td><td>Authorization checks and operations performed for that user.</td></tr>
+          <tr><td>Request ID / tracing metadata</td><td>Request-entry middleware or trusted tracing infrastructure.</td><td>Logs, diagnostics and downstream request correlation.</td></tr>
+          <tr><td>Request logger</td><td>Logging middleware.</td><td>Code that records events with consistent request fields.</td></tr>
+          <tr><td>Deadline / cancellation signal</td><td>Server request lifecycle or timeout policy.</td><td>Database calls, external requests and other cancellable work.</td></tr>
+        </tbody>
+      </table></div>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Concurrent requests remain separate</div>
+        <pre><code>Request A → context { requestId: "A", userId: "user-17" }
+Request B → context { requestId: "B", userId: "user-42" }
+
+Each handler reads the context associated with its own request.</code></pre>
+      </div>
+      <p>
+        Context is not a global <code>currentUser</code> variable and not a session that lasts across
+        requests. Its storage and propagation depend on the stack: request-local fields, an explicit
+        context argument or an asynchronous context facility. Downstream code only sees it when the
+        application or framework propagates it correctly.
+      </p>
+      <p>
+        Nor is every context a mutable dictionary. For example, Go derives contexts carrying values,
+        deadlines and cancellation from a parent; callers pass the derived context onward.
+        <a href="https://pkg.go.dev/context">Go context documentation</a>.
+        Keep business input explicit and context small so it does not become a hidden container for
+        every dependency, raw payload and secret.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Context carries metadata and signals for one request across function boundaries.</li>
+        <li>Keep concurrent requests isolated; never store the current user's identity in a shared global variable.</li>
+        <li>Propagate context deliberately; its API and mutability differ between frameworks.</li>
+        <li>Use context for request metadata, while keeping business inputs and dependencies clear.</li>
+      </ul></div>
+
+      <h2>Use verified identity, not a client-supplied owner</h2>
+      <p>
+        Consider a protected <code>POST /books</code> endpoint. A client could put another user's ID
+        in its JSON body. That field is merely a claim; it must not become the authority for who
+        owns the new record.
+      </p>
+      <ol class="flow">
+        <li><span class="flow-actor">Middleware</span><span class="flow-title">Verify the session or token</span>
+          <p>On success, establish the caller's user ID and relevant permissions in request context.
+            On failure, stop the protected request with an authentication error.</p></li>
+        <li><span class="flow-actor">Handler</span><span class="flow-title">Separate input from identity</span>
+          <p>Read the book fields from validated input. Read the actor's identity from the trusted
+            authentication result, not from an arbitrary body field.</p></li>
+        <li><span class="flow-actor">Service</span><span class="flow-title">Authorize the operation</span>
+          <p>Check that this actor can create the book. For ordinary self-service creation, derive
+            the owner ID from the actor and pass that explicit value to persistence.</p></li>
+        <li><span class="flow-actor">Repository</span><span class="flow-title">Persist the authorized data</span>
+          <p>Insert the permitted fields and owner ID. For reads, updates and deletes, apply the
+            appropriate ownership or tenant scope as well.</p></li>
+      </ol>
+      <p>
+        Reject unexpected ownership fields or ignore them according to a documented input contract.
+        If an administrator can create a book on someone else's behalf, make that an explicitly
+        authorized operation. A body-supplied target user can be input to that operation; it is
+        still not proof of permission.
+      </p>
+      <div class="callout callout--note">
+        <div class="callout-label">Authentication does not create an account on every request</div>
+        <p>Registration creates accounts, login establishes a session or issues credentials, and
+          authentication middleware usually verifies an existing session or token. Keep those
+          responsibilities distinct. Attaching a verified identity also does not authorize every
+          operation that identity might attempt.</p>
+      </div>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Derive the caller's identity from successful authentication, not a user ID supplied in the payload.</li>
+        <li>For ordinary creation, use that verified identity as the owner after authorization.</li>
+        <li>Acting on behalf of another user requires its own permission check.</li>
+        <li>Registration, login, authentication and authorization are related but separate operations.</li>
+      </ul></div>
+
+      <h2>Request IDs, deadlines and cancellation</h2>
+      <h3>Follow a request across logs and services</h3>
+      <p>
+        Generate a request ID near the entry point and attach it to the context. Include it when
+        logging handler, service and repository events. If the service calls another backend,
+        propagate agreed correlation metadata, for example through <code>X-Request-ID</code>.
+        This lets you connect events that belong to the same operation.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Correlated events</div>
+        <pre><code>req-7f21  POST /books          received
+req-7f21  book service         authorized user-17
+req-7f21  book repository      record created
+req-7f21  POST /books          completed with 201</code></pre>
+      </div>
+      <p>
+        A correlation ID is not an authentication credential. If clients supply IDs, validate their
+        format and length or replace them before using them in logs. A full distributed tracing
+        system also uses trace and span relationships to distinguish individual downstream calls.
+      </p>
+      <h3>Bound the lifetime of work</h3>
+      <p>
+        A deadline says when an operation should stop; cancellation signals that its result is no
+        longer needed. Carry those signals into downstream database and network operations that
+        support them. For example, a request with a two-second budget should not give each of three
+        sequential dependencies a fresh two seconds after the previous one finishes.
+      </p>
+      <p>
+        Cancellation is cooperative: code and drivers must observe it. It does not forcibly undo
+        completed work or roll back an already committed write. Release associated timers and other
+        resources when work ends. Go's context API provides parent/child propagation for these signals.
+        <a href="https://pkg.go.dev/context">Go deadlines and cancellation</a>.
+      </p>
+      <p>
+        Work that intentionally outlives the request needs an explicit lifecycle, often a queued
+        job with its own timeout and failure handling. Pass only the metadata it needs instead of
+        retaining an entire HTTP request and its short-lived context.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>A request ID connects logs and downstream activity; it never proves identity or permission.</li>
+        <li>Propagate cancellation and the remaining time budget to operations that support them.</li>
+        <li>Cancellation is cooperative and does not undo committed side effects.</li>
+        <li>Background jobs need their own lifetime, context and error handling.</li>
+      </ul></div>
+
+      <h2>Putting the pieces together</h2>
+      <p>
+        Imagine a signed-in user creating a book. This one example combines all three topics,
+        while keeping each responsibility visible:
+      </p>
+      <ol class="flow">
+        <li><span class="flow-actor">Entry</span><span class="flow-title">Establish the request pipeline</span>
+          <p>Assign a request ID, start timing, apply applicable limits and prepare response policies.
+            The router selects the protected POST /books operation.</p></li>
+        <li><span class="flow-actor">Middleware</span><span class="flow-title">Establish identity and usable input</span>
+          <p>Verify credentials and attach the principal to context. Decode the size-limited body
+            before its fields are consumed. Failures stop here.</p></li>
+        <li><span class="flow-actor">Handler</span><span class="flow-title">Translate HTTP into a service call</span>
+          <p>Validate the book name and other accepted fields, apply defaults, and pass the input
+            plus the verified actor to the create-book service.</p></li>
+        <li><span class="flow-actor">Service</span><span class="flow-title">Apply the use case</span>
+          <p>Check the actor's permissions and relevant business limits. Coordinate persistence and
+            any follow-up work according to the operation's transaction and retry requirements.</p></li>
+        <li><span class="flow-actor">Repository</span><span class="flow-title">Write the record</span>
+          <p>Use the authorized owner ID and book data in a safe database operation. Return the
+            created result to the service, which returns the public application result.</p></li>
+        <li><span class="flow-actor">Response</span><span class="flow-title">Complete the HTTP lifecycle</span>
+          <p>The handler sends 201 with the intended public fields. Logging records the outcome and
+            duration under the request ID. Errors follow the configured error-handling path.</p></li>
+      </ol>
+      <h3>Check your understanding</h3>
+      <ul>
+        <li><strong>Where does an invalid sort value fail?</strong> At boundary validation, before the service uses it.</li>
+        <li><strong>Where does “this user cannot edit that book” belong?</strong> In authorization for that resource, commonly in the service.</li>
+        <li><strong>Who builds the database query?</strong> The repository.</li>
+        <li><strong>Can middleware prevent the handler from running?</strong> Yes, by ending the request early.</li>
+        <li><strong>Where does the trusted owner ID come from?</strong> The verified principal, carried through request context.</li>
+        <li><strong>Does an error handler always go last?</strong> Its placement follows the framework's execution model.</li>
+      </ul>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li><strong>Handler:</strong> bind and validate input, call a service, return an HTTP response.</li>
+        <li><strong>Service:</strong> enforce business rules and permissions, then coordinate operations.</li>
+        <li><strong>Repository:</strong> perform focused persistence operations with predictable results.</li>
+        <li><strong>Middleware:</strong> reuse shared processing in a deliberate order, with early exits and error handling.</li>
+        <li><strong>Context:</strong> carry verified identity, correlation metadata and cancellation for one request.</li>
+      </ul></div>
+    </div>
+
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; a study guide for curious engineers.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+
+</div>
+
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</dialog>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>

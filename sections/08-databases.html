@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Databases &amp; PostgreSQL &middot; Backend Principles</title>
+<meta name="description" content="Backend database notes covering persistence, PostgreSQL types, constraints, relationships, migrations, seed data, joins, parameterized queries, pagination, indexes and timestamp triggers.">
+<script>
+  (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try {
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell">
+
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 08</p>
+      <h1>Databases &amp; PostgreSQL</h1>
+      <p class="lead">
+        Backend data must survive restarts, remain valid and support many users at once.
+        Learn how <strong>schemas, relationships, migrations and queries</strong> turn that
+        requirement into a working persistence layer, then use <strong>indexes and triggers</strong>
+        to support the operations your APIs need.
+      </p>
+    </header>
+
+    <div class="prose">
+      <h2>Persistence, memory and storage</h2>
+      <p>
+        Persistence means data survives the program that created it. A to-do app should still know
+        which tasks are complete after the process stops and the user comes back. A variable in
+        application memory alone cannot provide that guarantee.
+      </p>
+      <p>
+        A database is an organized collection of data; a <strong>database management system</strong>
+        (DBMS) is the software that manages it. Files and browser storage can provide persistence
+        too, but they offer different lifetimes and guarantees. Session storage, for example, is
+        scoped to a browser tab's session; browser-managed storage is not a substitute for the
+        server's authoritative records.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Storage</th><th>Strength</th><th>Tradeoff</th></tr></thead>
+        <tbody>
+          <tr><td>RAM</td><td>Fast access for active data.</td><td>Usually volatile and more expensive per unit of capacity.</td></tr>
+          <tr><td>SSD / HDD</td><td>Non-volatile storage with greater affordable capacity.</td><td>Access is generally slower than RAM; durability still depends on the system's write guarantees.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        This is not a strict divide between databases and caches. PostgreSQL uses memory buffers as
+        well as persistent storage. Redis keeps its working data in memory and can also persist it
+        using snapshots or an append-only file. Choose guarantees deliberately rather than assuming
+        “cache means no persistence” or “database means every read touches disk.”
+        <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/">Redis persistence options</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Persistence keeps data beyond the lifetime of the process that created it.</li>
+        <li>A database holds organized data; a DBMS manages storage and access.</li>
+        <li>Memory and disk work together; understand the actual durability guarantees of the chosen system.</li>
+      </ul></div>
+
+      <h2>Why use a DBMS instead of a plain file?</h2>
+      <p>
+        A file works for some small, single-writer workloads. You can give it a format and validate
+        its contents in application code. As requirements grow, you also need efficient lookup,
+        coordinated writes, access control, recovery and constraints. Implementing all of that
+        yourself becomes a storage-system project.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>DBMS responsibility</th><th>What it provides</th></tr></thead>
+        <tbody>
+          <tr><td>Organization and access</td><td>Structures and query operations for finding and changing data.</td></tr>
+          <tr><td>Integrity</td><td>Types and constraints that reject invalid stored states.</td></tr>
+          <tr><td>Concurrency and transactions</td><td>Mechanisms to coordinate overlapping operations and commit related changes together.</td></tr>
+          <tr><td>Security</td><td>Database roles and permissions; application-level authorization is still required.</td></tr>
+          <tr><td>Durability and recovery</td><td>Mechanisms to preserve committed work and recover after failures, alongside a backup and restore strategy.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>The lost-update example</h3>
+      <p>
+        Suppose an amount starts at 40. Two requests read 40 simultaneously. One adds 20 and writes
+        60; the other subtracts 20 and writes 20. A last-writer-wins workflow leaves either 20 or 60,
+        although applying both changes should leave 40. Faster parsing does not fix this race.
+      </p>
+      <p>
+        A database does not automatically make every read-then-write sequence correct. Use an atomic
+        update such as <code>SET amount = amount + $1</code>, or an appropriate transaction with
+        locking or a version check. A transaction groups work for commit or rollback; its isolation
+        level and the statements inside determine how concurrent operations interact.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Files can hold structured data, but coordination, integrity, efficient access and recovery need additional machinery.</li>
+        <li>DBMS features reduce the amount of storage logic the application must implement.</li>
+        <li>Prevent lost updates deliberately with atomic operations, locks or version checks; simply using a database is not enough.</li>
+      </ul></div>
+
+      <h2>Relational models, document models and PostgreSQL</h2>
+      <p>
+        Relational databases model data in tables with rows, columns and declared constraints.
+        Keys connect related records, and SQL expresses queries and changes. Document databases
+        such as MongoDB organize records as documents in collections, often allowing more variation
+        in shape. NoSQL also includes key-value, graph and other models; not every NoSQL system is
+        a document database.
+      </p>
+      <div class="cards cards--2">
+        <div class="card"><h4>Relational example</h4><p>A CRM has customers, contacts and sales opportunities.
+          Relationships, constraints and joins make a relational model useful for these connected records.</p></div>
+        <div class="card"><h4>Document example</h4><p>A content platform has articles with different combinations
+          of text, media and embedded blocks. A document model can fit those aggregates naturally.</p></div>
+      </div>
+      <p>
+        These are examples, not exclusive assignments. MongoDB supports schema validation, indexes
+        and transactions; flexible schemas still need design. PostgreSQL can store structured columns
+        alongside JSON documents. Neither database category guarantees accurate application data
+        without the right rules. <a href="https://www.mongodb.com/docs/manual/core/schema-validation/">MongoDB schema validation</a>.
+      </p>
+      <h3>Why this lesson uses PostgreSQL</h3>
+      <p>
+        PostgreSQL combines relational constraints, transactions, SQL, extensibility and strong JSON
+        capabilities. It is an open-source DBMS and a useful system for learning these concepts.
+        SQL is the language; PostgreSQL is the software executing it. Standard SQL helps portability,
+        but types, functions, extensions and behavior differ across engines. Moving to MySQL or SQL
+        Server is not automatically a small configuration change.
+      </p>
+      <p>
+        Choose a database from access patterns, consistency needs, operations and team experience.
+        JSON support alone does not make all document databases unnecessary. This lesson assumes
+        basic familiarity with SELECT, INSERT, UPDATE and DELETE and concentrates on their use in a backend.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Relational tables and documents organize data differently; both benefit from explicit schema and integrity decisions.</li>
+        <li>PostgreSQL supports relational data and JSON; MongoDB can enforce document validation.</li>
+        <li>SQL knowledge transfers between engines, but database migrations between products require compatibility work.</li>
+      </ul></div>
+
+      <h2>Numeric and text types</h2>
+      <p>Choose a type that describes the value, its valid range and the calculations it must support.</p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Type</th><th>Use and behavior</th></tr></thead>
+        <tbody>
+          <tr><td><code>smallint</code></td><td>2-byte signed integer, −32,768 to 32,767.</td></tr>
+          <tr><td><code>integer</code></td><td>4-byte signed integer, roughly ±2.1 billion.</td></tr>
+          <tr><td><code>bigint</code></td><td>8-byte signed integer for larger ranges. Preserve precision when exchanging it with clients.</td></tr>
+          <tr><td><code>numeric(p, s)</code> / <code>decimal(p, s)</code></td><td>Equivalent exact decimal types with a declared precision and scale.</td></tr>
+          <tr><td><code>real</code> / <code>double precision</code></td><td>Approximate binary floating-point types, useful when that numerical model suits the computation.</td></tr>
+          <tr><td><code>serial</code> / <code>bigserial</code></td><td>Sequence-backed shorthand for automatically supplied integer values, not a guarantee of gapless numbering.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        The range order is <code>smallint &lt; integer &lt; bigint</code>. A <code>numeric(10, 2)</code>
+        allows eight digits before the decimal point and two after it; excess fractional precision
+        is rounded and an out-of-range result fails. Binary floats cannot exactly represent many
+        decimal fractions. Use exact decimal values, or a deliberately scaled integer model, for
+        amounts requiring exact decimal arithmetic, and define rounding rules.
+        <a href="https://www.postgresql.org/docs/current/datatype-numeric.html">PostgreSQL numeric types</a>.
+      </p>
+      <p>
+        For new sequential keys, identity columns make generation explicit, for example
+        <code>bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY</code>. A sequence normally starts at
+        1, and rolled-back inserts can leave gaps. Identity generation and primary-key uniqueness
+        are separate properties.
+      </p>
+      <h3>Text length is a business rule, not a magic number</h3>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Type</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>char(n)</code></td><td>Fixed-length, space-padded character data.</td></tr>
+          <tr><td><code>varchar(n)</code></td><td>Variable-length text with a maximum character count.</td></tr>
+          <tr><td><code>text</code></td><td>Variable-length text without a declared length limit; implementation limits still exist.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        PostgreSQL has no general performance advantage for an arbitrary <code>varchar(255)</code>
+        over <code>text</code>, and text columns can be indexed subject to index limits. Use a meaningful
+        length constraint when the domain needs one, either through varchar or a CHECK on text.
+        Keep important invariants in the database as well as validating requests. Character values
+        have an implementation limit of about 1 GB, not unlimited storage.
+        <a href="https://www.postgresql.org/docs/current/datatype-character.html">PostgreSQL character types</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Integer capacity increases from smallint to integer to bigint.</li>
+        <li>numeric and decimal are exact decimal types; floating-point values are approximations.</li>
+        <li>Generated IDs need a uniqueness constraint and can have gaps.</li>
+        <li>Use text or a meaningful length bound; 255 is not a universal optimization or domain rule.</li>
+      </ul></div>
+
+      <h2>Time, UUIDs, JSON and other types</h2>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Type</th><th>What it models</th></tr></thead>
+        <tbody>
+          <tr><td><code>boolean</code></td><td>true or false; SQL NULL is also possible unless prohibited.</td></tr>
+          <tr><td><code>date</code></td><td>A calendar date, such as a task's due date.</td></tr>
+          <tr><td><code>time</code></td><td>A time of day without a date.</td></tr>
+          <tr><td><code>timestamp</code></td><td>A date and time without time-zone interpretation.</td></tr>
+          <tr><td><code>timestamptz</code></td><td>An instant, normalized internally and displayed using the session time zone.</td></tr>
+          <tr><td><code>interval</code></td><td>A span expressed with components such as months, days and time.</td></tr>
+          <tr><td><code>uuid</code></td><td>A UUID value, often used as a resource identifier.</td></tr>
+          <tr><td><code>json</code> / <code>jsonb</code></td><td>Validated JSON text or a decomposed representation suited to queries and indexing.</td></tr>
+          <tr><td>Arrays, such as <code>text[]</code></td><td>Multiple values of a declared element type.</td></tr>
+          <tr><td><code>inet</code>, <code>macaddr</code>, geometric and XML types</td><td>Specialized domains with their own supported operations.</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout callout--key">
+        <div class="callout-label">timestamptz does not keep the original zone</div>
+        <p>It identifies an instant, not the original IANA zone name or input offset. Store a separate
+          zone such as Asia/Kolkata when that information is part of the domain. Also,
+          <code>CURRENT_TIMESTAMP</code> is the transaction start time; <code>statement_timestamp()</code>
+          is the statement start time. <a href="https://www.postgresql.org/docs/current/datatype-datetime.html">Date/time types</a>
+          and <a href="https://www.postgresql.org/docs/current/functions-datetime.html#FUNCTIONS-DATETIME-CURRENT">current-time functions</a>.</p>
+      </div>
+      <p>
+        A UUID is not an authorization mechanism. A caller who knows an ID still needs permission
+        to read or change its resource. The schema below uses <code>gen_random_uuid()</code> to
+        generate values and a primary key to enforce uniqueness.
+      </p>
+      <p>
+        <code>json</code> preserves input text details; <code>jsonb</code> trades that preservation
+        for a representation that supports efficient processing and indexing. jsonb does not retain
+        whitespace, key order or duplicate object keys. Prefer it for many queryable document fields,
+        but still define and validate their shape. Frequently joined or constrained attributes often
+        belong in ordinary columns. <a href="https://www.postgresql.org/docs/current/datatype-json.html">PostgreSQL JSON types</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use date for dates and timestamptz for instants; save a separate time-zone identifier when needed.</li>
+        <li>CURRENT_TIMESTAMP stays fixed within a transaction; statement_timestamp follows each statement.</li>
+        <li>UUIDs identify resources but do not authorize access.</li>
+        <li>jsonb supports flexible content and indexing without eliminating schema-design decisions.</li>
+      </ul></div>
+
+      <h2>Migrations: version the schema</h2>
+      <p>
+        A migration is an ordered, version-controlled change to the database. Instead of making
+        untracked edits in a graphical client, put table, constraint, index and trigger changes into
+        files reviewed alongside application code. A migration runner records applied versions so
+        it can apply pending changes rather than replaying every CREATE statement.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Example project layout</div>
+        <pre><code>db/
+  migrations/
+    20261003090000_create_project_schema.sql
+    20261003091000_add_query_indexes.sql
+    20261003092000_maintain_updated_at.sql
+  seeds/
+    development.sql</code></pre>
+      </div>
+      <p>
+        With dbmate, <code>dbmate new create_project_schema</code> creates a timestamped migration;
+        <code>dbmate up</code> applies pending migrations. A <code>DATABASE_URL</code> configures the
+        target database. Keep credentials out of version control and verify the target before running
+        changes. dbmate uses <code>schema_migrations</code> to record applied versions, not merely a
+        guess based on the newest filename. <a href="https://github.com/amacneil/dbmate">dbmate documentation</a>.
+      </p>
+      <h3>Up and down have limits</h3>
+      <p>
+        An up migration applies a change; a down migration may reverse its structure. Dropping a
+        populated table and recreating it does not restore the lost rows. A rollback script is not
+        a backup. Some teams use forward fixes in production and reserve destructive downs for
+        disposable environments.
+      </p>
+      <p>
+        Apply new changes in new files after a migration is shared or deployed. Test on representative
+        data, consider locks and table rewrites, and keep old and new application versions compatible
+        during rollout. Large backfills may need a separate controlled job. A GUI such as TablePlus
+        is useful for exploration; the reviewed migration remains the repeatable schema change.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Version schema changes as ordered files and let a migration runner track applied versions.</li>
+        <li>Add a new migration for a new change; avoid rewriting deployed history.</li>
+        <li>Down migrations can undo structure, but cannot magically recover deleted data.</li>
+        <li>Review deployment compatibility, locking, target environment and recovery before applying changes.</li>
+      </ul></div>
+
+      <h2>Constraints and enums: make invalid states harder to store</h2>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Constraint</th><th>What it enforces</th></tr></thead>
+        <tbody>
+          <tr><td><code>PRIMARY KEY</code></td><td>Unique, non-null identification of a row, using one column or a combination.</td></tr>
+          <tr><td><code>NOT NULL</code></td><td>The column must have a non-null value.</td></tr>
+          <tr><td><code>UNIQUE</code></td><td>No repeated equal key values; ordinary PostgreSQL unique constraints allow multiple nulls.</td></tr>
+          <tr><td><code>CHECK</code></td><td>A condition cannot evaluate to false. Unknown/null does not fail it, so NOT NULL may also be needed.</td></tr>
+          <tr><td><code>FOREIGN KEY</code></td><td>Non-null referencing values must match an eligible key in the referenced table.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        A default supplies an omitted value; it does not itself forbid an explicit NULL. Choose
+        nullability from the domain, not a target percentage of columns. Boundary validation gives
+        clients useful errors, while database constraints protect every writer, including scripts
+        and concurrent requests. <a href="https://www.postgresql.org/docs/current/ddl-constraints.html">PostgreSQL constraints</a>.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Schema migration — up, part 1: allowed states</div>
+        <pre><code class="language-sql" data-example="schema-types">CREATE TYPE project_status AS ENUM
+  ('planned', 'active', 'completed', 'archived');
+CREATE TYPE task_status AS ENUM
+  ('pending', 'in_progress', 'completed', 'cancelled');
+CREATE TYPE member_role AS ENUM ('owner', 'admin', 'member');</code></pre>
+      </div>
+      <p>
+        An enum rejects values outside its declared labels and makes the allowed set visible in the
+        schema. The project default below is planned, matching Lesson 07's API example. Enums suit
+        relatively stable sets; text with a CHECK or a lookup table may suit frequently changing
+        values better. Enum removal or reordering is more involved than adding a label.
+      </p>
+      <p>
+        These types validate a stored state, not the legality of every transition. Moving a project
+        from archived to active may require business authorization even though both labels are valid.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use keys, required values, uniqueness, checks and foreign keys to enforce database invariants.</li>
+        <li>Defaults and CHECK conditions do not replace NOT NULL.</li>
+        <li>Enums document allowed labels; transition rules and permissions still belong in the use case.</li>
+      </ul></div>
+
+      <h2>Users and profiles: one-to-one relationships</h2>
+      <p>
+        The next SQL blocks form one schema migration, in the order shown. They model the user/project
+        portion of the platform from <a href="07-api-design.html">API Design</a>. An organization-based
+        product would also retain organization relationships and enforce that scope on operations.
+        Here, users can own projects, join projects and receive task assignments.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Schema migration — up, part 2: users and optional profiles</div>
+        <pre><code class="language-sql" data-example="schema-users">CREATE TABLE users (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  email text NOT NULL UNIQUE,
+  full_name text NOT NULL CHECK (char_length(btrim(full_name)) &gt; 0),
+  password_hash text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE user_profiles (
+  user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  avatar_url text,
+  bio text,
+  phone text,
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);</code></pre>
+      </div>
+      <p>
+        <code>user_profiles.user_id</code> is both its primary key and a foreign key. A user can
+        therefore have <strong>at most one</strong> profile. This does not force every user to have
+        a profile; that requires an additional creation rule. Nullable profile fields let a user
+        omit a bio, phone number or image.
+      </p>
+      <p>
+        Separating optional profile data can be useful for independent ownership, lifecycle or access
+        patterns, but it is not automatically faster or necessary. Keeping these fields in users is
+        also reasonable for a simpler model. Choose the relationship deliberately.
+      </p>
+      <div class="callout callout--warn">
+        <div class="callout-label">Stored credentials are not response fields</div>
+        <p>password_hash holds the output of the application's password-hashing workflow, never a
+          plaintext password. Select explicit public fields when building API responses. A query
+          that returns every users column can expose password hashes even though the passwords
+          themselves were not stored in plaintext.</p>
+      </div>
+      <p>
+        The email constraint enforces the database's equality behavior, not the full application's
+        email-identity policy. Define normalization and case handling consistently, and match the
+        uniqueness rule to that policy. Lowercase snake_case identifiers also avoid PostgreSQL's
+        quoted-name surprises: unquoted names fold to lowercase, while quoted names preserve case.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>A foreign key that is also unique or primary enforces at most one related profile per user.</li>
+        <li>Optional relationships are not mandatory relationships; a profile row may be absent.</li>
+        <li>Keep password hashes private and align email uniqueness with the application's identity policy.</li>
+        <li>Use a consistent identifier convention; unquoted PostgreSQL identifiers fold to lowercase.</li>
+      </ul></div>
+
+      <h2>Projects and tasks: one-to-many relationships</h2>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Schema migration — up, part 3: ownership and tasks</div>
+        <pre><code class="language-sql" data-example="schema-projects">CREATE TABLE projects (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL CHECK (char_length(btrim(name)) &gt; 0),
+  description text,
+  status project_status NOT NULL DEFAULT 'planned',
+  owner_id uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE tasks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  title text NOT NULL CHECK (char_length(btrim(title)) &gt; 0),
+  description text,
+  priority integer NOT NULL DEFAULT 1 CHECK (priority BETWEEN 1 AND 5),
+  status task_status NOT NULL DEFAULT 'pending',
+  due_date date,
+  assigned_to uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);</code></pre>
+      </div>
+      <p>
+        Many tasks can share one <code>project_id</code>, so a project has a one-to-many relationship
+        with tasks. Each task has its own primary key. Its project foreign key is required, while
+        <code>assigned_to</code> can be null for an unassigned task. A syntactically valid UUID is
+        insufficient for either reference: the referenced row must exist.
+      </p>
+      <h3>Choose what happens when a parent is deleted</h3>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Action</th><th>Effect</th><th>Example here</th></tr></thead>
+        <tbody>
+          <tr><td><code>RESTRICT</code></td><td>Reject deletion while referencing rows remain.</td><td>A user owning a project cannot be deleted until ownership or the project is dealt with.</td></tr>
+          <tr><td><code>CASCADE</code></td><td>Delete referencing rows along with the parent.</td><td>Deleting a project removes its tasks; deleting a user removes their profile.</td></tr>
+          <tr><td><code>SET NULL</code></td><td>Clear the reference; the column must allow null.</td><td>Deleting an assignee leaves their tasks unassigned.</td></tr>
+          <tr><td><code>SET DEFAULT</code></td><td>Replace the reference with its default, which must still satisfy constraints.</td><td>Useful only when the replacement value is valid for the domain.</td></tr>
+          <tr><td><code>NO ACTION</code></td><td>The default; reject a remaining violation when checked. Checking can be deferred if the constraint is declared deferrable.</td><td>Different timing rules from RESTRICT can matter within transactions.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Cascades are a product decision, not an automatic convenience to apply everywhere. Their
+        effects can span many rows. If a user also owns projects, the owner RESTRICT rule can reject
+        the whole deletion even though another reference says SET NULL. All constraints must hold.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>One-to-many uses a foreign key on the many side, without making that foreign key unique.</li>
+        <li>Foreign keys ensure references exist; CHECK and NOT NULL enforce required valid values.</li>
+        <li>Choose RESTRICT, CASCADE, SET NULL or other delete actions according to the resource lifecycle.</li>
+        <li>Every affected constraint applies; one permissive delete action cannot override another restriction.</li>
+      </ul></div>
+
+      <h2>Memberships: many-to-many relationships</h2>
+      <p>
+        A user may join many projects and a project may have many users. Represent each membership
+        as a row in a linking table. The role belongs to that relationship: someone can be an admin
+        in one project and a member in another.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Schema migration — up, part 4: a composite key</div>
+        <pre><code class="language-sql" data-example="schema-members">CREATE TABLE project_members (
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role member_role NOT NULL DEFAULT 'member',
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (project_id, user_id)
+);</code></pre>
+      </div>
+      <p>
+        The pair <code>(project_id, user_id)</code> identifies a membership. It permits one user in
+        several projects and several users in one project, while rejecting a duplicate membership
+        pair. Deleting either parent removes its corresponding membership rows.
+      </p>
+      <p>
+        This schema does not automatically synchronize <code>projects.owner_id</code> with a membership
+        whose role is owner. Maintain that invariant in a transaction if the application requires
+        both representations. It also does not prove that an assigned task user is a project member;
+        validate that business rule or model a suitable additional constraint.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Schema migration — down, for a disposable example database</div>
+        <pre><code class="language-sql" data-example="schema-down">DROP TABLE project_members;
+DROP TABLE tasks;
+DROP TABLE projects;
+DROP TABLE user_profiles;
+DROP TABLE users;
+DROP TYPE member_role;
+DROP TYPE task_status;
+DROP TYPE project_status;</code></pre>
+      </div>
+      <p>
+        Place the four creation blocks under dbmate's <code>-- migrate:up</code> marker and the
+        teardown under <code>-- migrate:down</code>. Drop dependent tables before the parents and
+        types they reference. This teardown deletes the data; it is not a production recovery plan.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>A linking table models many-to-many relationships and can store relationship-specific attributes.</li>
+        <li>A composite primary key prevents duplicate pairs without an extra synthetic ID.</li>
+        <li>Constraints enforce the rules declared in the schema, not every unstated business invariant.</li>
+        <li>Reverse dependencies when tearing down a schema, and recognize that dropped data is lost.</li>
+      </ul></div>
+
+      <h2>Seeding: create useful development data</h2>
+      <p>
+        Seed data gives development and test environments predictable records before real users
+        exist. Keep test fixtures separate from production migrations. Reference data required by
+        the application, such as a maintained country table, has a different lifecycle from fake users.
+      </p>
+      <p>
+        Insert parents before their children. A common table expression (CTE) can use INSERT's
+        RETURNING result to pass newly generated IDs into another insert within the same statement.
+        A CTE is a named query result, not a permanently created table.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Development-only fixture — run once in a disposable database</div>
+        <pre><code class="language-sql" data-example="seed">WITH inserted_user AS (
+  INSERT INTO users (email, full_name, password_hash)
+  VALUES ('learner@example.test', 'Test Learner', 'disabled-fixture-no-login')
+  RETURNING id
+), inserted_profile AS (
+  INSERT INTO user_profiles (user_id, bio)
+  SELECT id, 'Learning database relationships' FROM inserted_user
+  RETURNING user_id
+), inserted_project AS (
+  INSERT INTO projects (name, owner_id)
+  SELECT 'Backend study project', id FROM inserted_user
+  RETURNING id, owner_id
+), inserted_membership AS (
+  INSERT INTO project_members (project_id, user_id, role)
+  SELECT id, owner_id, 'owner' FROM inserted_project
+  RETURNING project_id
+)
+INSERT INTO tasks (project_id, title)
+SELECT project_id, 'Review the schema' FROM inserted_membership
+RETURNING id, project_id, title, status;</code></pre>
+      </div>
+      <p>
+        The password marker deliberately represents a disabled, non-login fixture; it is not a
+        password hash to use for authentication. For login tests, generate a real hash through the
+        application's configured password-hashing library. Never seed a shared production password.
+      </p>
+      <p>
+        This fixture is intentionally run once: a second run hits the unique email constraint.
+        Choose a clean-database reset or a deliberate conflict-handling strategy for repeatable tests.
+        Also test missing profiles, unassigned tasks, duplicate input and constraint failures, not
+        just a fully populated successful example.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Keep development fixtures separate from production schema changes and required reference data.</li>
+        <li>Use returned IDs to create related rows; CTEs can express that dependency within one statement.</li>
+        <li>Define repeat-run behavior and include missing relationships and invalid-input cases in tests.</li>
+      </ul></div>
+
+      <h2>Read data with joins and explicit response fields</h2>
+      <p>
+        A user and their profile live in two tables but can be returned from one query. Think through
+        FROM and JOIN to establish where the data comes from, then choose SELECT fields. SQL syntax
+        still places SELECT first. Short aliases such as <code>u</code> and <code>up</code> make
+        column references clear.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>A bounded list for an authorized user-directory endpoint</div>
+        <pre><code class="language-sql" data-example="read-users">SELECT
+  u.id,
+  u.full_name,
+  u.created_at,
+  CASE WHEN up.user_id IS NULL THEN NULL
+       ELSE jsonb_build_object(
+         'avatarUrl', up.avatar_url,
+         'bio', up.bio
+       )
+  END AS profile
+FROM users AS u
+LEFT JOIN user_profiles AS up ON up.user_id = u.id
+ORDER BY u.created_at DESC, u.id DESC
+LIMIT 20;</code></pre>
+      </div>
+      <p>
+        LEFT JOIN keeps each selected user even if a profile is absent; profile then becomes null.
+        INNER JOIN would exclude unmatched users, not necessarily empty the entire result. An
+        unrestricted one-to-many join can multiply rows, so consider aggregation or another query
+        when combining projects with many tasks.
+      </p>
+      <p>
+        PostgreSQL's <code>to_jsonb</code> can convert a composite row into JSON, but converting an
+        entire row couples the response to every current and future column. Building an explicit
+        JSON object here avoids publishing private profile fields. The users selection also omits
+        email and password_hash. Add further authorization scope as required by the application.
+      </p>
+      <p>
+        The repository returns selected values; the service and controller still map and serialize
+        the public response. Neither the language nor the presence of a JSON column eliminates
+        serialization work. For predictable pagination, the ordering includes an ID tie-breaker
+        when creation times are equal.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>LEFT JOIN preserves unmatched rows from the left; INNER JOIN keeps only matched combinations.</li>
+        <li>Select explicit response fields and build intentional nested objects; do not expose password hashes.</li>
+        <li>Use deterministic ordering and bounds, and account for row multiplication in one-to-many joins.</li>
+      </ul></div>
+
+      <h2>Parameterized values and safe dynamic SQL</h2>
+      <p>
+        Bind client-supplied values separately from SQL text. PostgreSQL-style placeholders use
+        <code>$1</code>, <code>$2</code> and so on; individual drivers may expose another placeholder
+        syntax. The driver binds data with types, not necessarily as strings, and the server does
+        not reinterpret that data as SQL syntax.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Query template — bind the requested UUID as parameter 1</div>
+        <pre><code class="language-sql" data-example="read-user">SELECT u.id, u.full_name, u.created_at
+FROM users AS u
+WHERE u.id = $1::uuid;</code></pre>
+      </div>
+      <p>
+        Supply the UUID as a separate argument to the driver's execution call. Do not add quote
+        characters around the value yourself or wrap <code>$1</code> in SQL string quotes. A value
+        containing SQL-looking text remains data; an invalid UUID fails type conversion. A valid
+        UUID still requires a permission check. Parameterization prevents injection, not unauthorized access.
+        <a href="https://www.postgresql.org/docs/current/sql-prepare.html">PostgreSQL prepared statements and parameters</a>.
+      </p>
+      <div class="callout callout--warn">
+        <div class="callout-label">Column names and ASC/DESC are not value parameters</div>
+        <p><code>ORDER BY $1 $2</code> cannot bind a column and a sort direction. Some editor dialogs
+          perform textual substitution, which is different from genuine value binding. Map validated
+          sort choices to fixed SQL fragments controlled by the application; keep data values bound.</p>
+      </div>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Accepted API value</th><th>Application-owned SQL fragment</th></tr></thead>
+        <tbody>
+          <tr><td><code>sortBy=fullName</code></td><td><code>u.full_name</code></td></tr>
+          <tr><td><code>sortBy=createdAt</code></td><td><code>u.created_at</code></td></tr>
+          <tr><td><code>sortOrder=asc</code></td><td><code>ASC</code></td></tr>
+          <tr><td><code>sortOrder=desc</code></td><td><code>DESC</code></td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Reject unsupported choices, and never concatenate the raw client string into the query.
+        The same rule applies to dynamic update column names. Most query builders support safe
+        value binding, but their raw-SQL escape hatches still require care.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Keep SQL structure separate from bound values; let the driver handle value encoding.</li>
+        <li>Placeholders represent values, not identifiers, keywords or arbitrary SQL fragments.</li>
+        <li>Build sort and update structure only from validated choices mapped to trusted fragments.</li>
+        <li>Injection protection does not replace input validation or resource authorization.</li>
+      </ul></div>
+
+      <h2>Filtering, sorting and pagination in SQL</h2>
+      <p>
+        Suppose an authorized directory endpoint accepts <code>letter</code>, <code>sortBy</code>,
+        <code>sortOrder</code>, <code>page</code> and <code>limit</code>. Validate those inputs before
+        query construction. Default to page 1, limit 20 and creation time descending, with a maximum
+        limit of 100. The API page is one-based; the database offset is a count of skipped rows.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Default-sort query template</div>
+        <pre><code class="language-sql" data-example="list-users">SELECT u.id, u.full_name, u.created_at
+FROM users AS u
+WHERE ($1::text IS NULL OR u.full_name ILIKE ($1::text || '%'))
+ORDER BY u.created_at DESC, u.id DESC
+LIMIT $2::integer OFFSET $3::bigint;</code></pre>
+      </div>
+      <p>
+        Bind parameter 1 to the validated first letter, or NULL when omitted. This example accepts
+        one ASCII letter, not wildcard input. ILIKE is case-insensitive pattern matching and
+        <code>%</code> means any following characters. If the feature later accepts arbitrary
+        literal prefixes, escape pattern metacharacters such as <code>%</code> and <code>_</code>
+        deliberately; parameter binding alone does not change their pattern meaning.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Client request</th><th>Bound limit</th><th>Computed offset</th></tr></thead>
+        <tbody>
+          <tr><td><code>page=1&amp;limit=20</code></td><td>20.</td><td>0.</td></tr>
+          <tr><td><code>page=2&amp;limit=20</code></td><td>20.</td><td>20.</td></tr>
+          <tr><td><code>page=3&amp;limit=20</code></td><td>20.</td><td>40.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Use <code>offset = (page − 1) × limit</code>, not just page minus one. For a different sort,
+        select an allowed column and direction from the mapping in the previous section. Retain
+        a unique tie-breaker. Optional filters can also be added as fixed query fragments only
+        when present, rather than using the nullable-parameter form above.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Count template — match the same filter and access scope</div>
+        <pre><code class="language-sql" data-example="count-users">SELECT count(*) AS total
+FROM users AS u
+WHERE ($1::text IS NULL OR u.full_name ILIKE ($1::text || '%'));</code></pre>
+      </div>
+      <p>
+        Counting and fetching in separate statements can observe different committed states.
+        Use a consistent snapshot if the contract requires exact agreement. Cursor pagination and
+        optional totals can be preferable for large or changing collections. For tenant-scoped
+        endpoints, include the same authorization restriction in both queries.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Validate query inputs, bind filter values and construct sort syntax only from allowed choices.</li>
+        <li>OFFSET is the number of skipped rows: (page − 1) × limit.</li>
+        <li>Pattern matching has its own wildcard rules even when parameters are safely bound.</li>
+        <li>Counts and rows must share filters and permissions; decide whether a consistent snapshot is required.</li>
+      </ul></div>
+
+      <h2>Inserts, partial updates and transactions</h2>
+      <p>
+        A create-user use case validates input and creates a password hash in application code, then
+        inserts the permitted fields. Defaults fill the ID and initial timestamps. RETURNING lets
+        the repository obtain the inserted record without a separate lookup.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Create template — return only intended account fields</div>
+        <pre><code class="language-sql" data-example="create-user">INSERT INTO users (email, full_name, password_hash)
+VALUES ($1::text, $2::text, $3::text)
+RETURNING id, email, full_name, created_at;</code></pre>
+      </div>
+      <p>
+        Handle the unique email constraint even if the application already checked availability;
+        another request could insert that email between the check and this statement. Map the
+        database error to the documented API behavior without returning raw SQL diagnostics.
+      </p>
+      <h3>Only update fields present in the patch</h3>
+      <p>
+        If a profile patch contains bio and phone, build a SET list containing those allowed fields.
+        Leave an omitted avatar URL untouched. An explicit null can clear a nullable field when
+        the API permits it; omission and null are different. This template assumes the user is
+        authorized to edit the profile identified by parameter 3.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Update template — bio and phone supplied, avatar omitted</div>
+        <pre><code class="language-sql" data-example="update-profile">UPDATE user_profiles
+SET bio = $1::text,
+    phone = $2::text
+WHERE user_id = $3::uuid
+RETURNING user_id, avatar_url, bio, phone, updated_at;</code></pre>
+      </div>
+      <p>
+        An UPDATE that matches no profile returns no rows. Decide whether the use case creates a
+        missing profile, treats it as not found, or requires a separate creation flow. Reject an
+        empty patch or define it as a no-op; do not accidentally generate an empty SET clause.
+        Without the trigger introduced later, this statement does not refresh updated_at.
+      </p>
+      <p>
+        When creating a project and its owner membership, use one transaction so both changes
+        succeed together. On failure, roll back and release the connection. A transaction does
+        not make external notifications rollbackable; arrange those after commit or through a
+        reliable delivery workflow. Keep transactions short and handle retryable conflicts deliberately.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Bind insert values and return only fields appropriate for the caller, never password hashes.</li>
+        <li>Database constraints still matter after application validation, especially under concurrency.</li>
+        <li>Partial updates change supplied fields; define null, omission, empty-patch and missing-row behavior.</li>
+        <li>Use transactions for related database changes, with explicit rollback and failure handling.</li>
+      </ul></div>
+
+      <h2>Indexes: support measured access patterns</h2>
+      <p>
+        A book index helps you find a topic without reading every page. A database index similarly
+        gives the query planner another way to find rows or satisfy ordering. PostgreSQL's default
+        B-tree index is a search structure, not a guarantee that every lookup is constant time or
+        that all index data lives in RAM at one physical location.
+      </p>
+      <p>
+        Indexes occupy storage and add maintenance work to writes. A sequential scan can be the
+        best choice for a small table or a query returning much of it. Consider frequent WHERE,
+        JOIN and ORDER BY patterns, inspect actual plans, and avoid adding an index to every column.
+      </p>
+      <h3>First check what already exists</h3>
+      <ul>
+        <li>Primary keys and unique constraints create supporting unique indexes automatically.</li>
+        <li><code>users.email</code> already has an index from UNIQUE; a second identical index is unnecessary.</li>
+        <li><code>user_profiles.user_id</code> is indexed because it is the primary key.</li>
+        <li>Foreign keys do not automatically create an index on the referencing side.</li>
+        <li><code>project_members(project_id, user_id)</code> naturally supports lookup by its leading project_id; user-only lookup may need another index.</li>
+      </ul>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Candidate migration — choose these for corresponding frequent queries</div>
+        <pre><code class="language-sql" data-example="indexes-up">-- migrate:up
+CREATE INDEX users_created_at_id_idx
+  ON users (created_at DESC, id DESC);
+CREATE INDEX projects_owner_id_idx
+  ON projects (owner_id);
+CREATE INDEX tasks_project_created_at_id_idx
+  ON tasks (project_id, created_at DESC, id DESC);
+CREATE INDEX tasks_assigned_to_idx
+  ON tasks (assigned_to);
+CREATE INDEX project_members_user_id_idx
+  ON project_members (user_id);</code></pre>
+      </div>
+      <p>
+        The tasks composite index supports selecting a project's tasks in creation order and begins
+        with project_id for project lookups. Do not automatically add another project_id-only index.
+        A status-only index may be unhelpful when most rows share that status; a composite or partial
+        index may fit a particular workload better.
+      </p>
+      <p>
+        A B-tree can scan forward or backward, so you do not normally need separate ascending and
+        descending indexes for a single column. Mixed directions and leading columns matter for
+        multi-column ordering. ILIKE search may need an expression index or a specialized operator
+        class; an ordinary text B-tree does not automatically optimize every pattern.
+        <a href="https://www.postgresql.org/docs/current/indexes-ordering.html">Indexes and ordering</a>,
+        <a href="https://www.postgresql.org/docs/current/indexes-multicolumn.html">multicolumn indexes</a>.
+      </p>
+      <h3>Measure with a query plan</h3>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Read-only plan inspection</div>
+        <pre><code class="language-sql" data-example="explain-users">EXPLAIN (ANALYZE, BUFFERS)
+SELECT id, full_name, created_at
+FROM users
+ORDER BY created_at DESC, id DESC
+LIMIT 20;</code></pre>
+      </div>
+      <p>
+        Compare estimates, actual rows, scans, sorting and buffer activity using representative data.
+        EXPLAIN ANALYZE executes the statement, so use care with writes or expensive queries. A tiny
+        seed table using a sequential scan does not prove the index is broken.
+        <a href="https://www.postgresql.org/docs/current/using-explain.html">PostgreSQL EXPLAIN guide</a>.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Reverse the example index migration</div>
+        <pre><code class="language-sql" data-example="indexes-down">-- migrate:down
+DROP INDEX project_members_user_id_idx;
+DROP INDEX tasks_assigned_to_idx;
+DROP INDEX tasks_project_created_at_id_idx;
+DROP INDEX projects_owner_id_idx;
+DROP INDEX users_created_at_id_idx;</code></pre>
+      </div>
+      <p>
+        Ordinary index creation can block writes. For a busy production table, evaluate PostgreSQL's
+        concurrent build option and its restrictions; it cannot run inside a transaction block and
+        needs a migration configured accordingly. An index is an operational change as well as a query aid.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Index frequent, measured access patterns; account for storage and write-maintenance costs.</li>
+        <li>Primary and unique keys already have indexes; referencing foreign keys do not automatically get them.</li>
+        <li>Consider leading columns, order and selectivity before adding overlapping indexes.</li>
+        <li>Use EXPLAIN with representative data; ANALYZE executes the query.</li>
+      </ul></div>
+
+      <h2>Triggers: maintain updated_at deliberately</h2>
+      <p>
+        <code>DEFAULT CURRENT_TIMESTAMP</code> initializes a value on insertion; it does not run
+        again whenever the row changes. You can set updated_at in every update statement or install
+        a trigger so all writers follow the same rule.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Timestamp migration — reusable function and table triggers</div>
+        <pre><code class="language-sql" data-example="triggers-up">-- migrate:up
+CREATE FUNCTION set_updated_at()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  NEW.updated_at = statement_timestamp();
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER users_set_updated_at
+BEFORE UPDATE ON users
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER user_profiles_set_updated_at
+BEFORE UPDATE ON user_profiles
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER projects_set_updated_at
+BEFORE UPDATE ON projects
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER tasks_set_updated_at
+BEFORE UPDATE ON tasks
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER project_members_set_updated_at
+BEFORE UPDATE ON project_members
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();</code></pre>
+      </div>
+      <p>
+        NEW is the proposed row value. The BEFORE UPDATE trigger changes its timestamp before the
+        row is stored, and RETURN NEW passes that row onward. BEGIN/END delimit the function body;
+        they do not start a separate SQL transaction. The trigger runs in the updating statement's
+        transaction. <a href="https://www.postgresql.org/docs/current/plpgsql-trigger.html">PostgreSQL trigger functions</a>.
+      </p>
+      <p>
+        This policy uses statement start time, so all rows updated by one statement get the same
+        timestamp. It also fires for updates that assign existing values. If the domain needs only
+        meaningful changes to advance the timestamp, define that condition explicitly. updated_at
+        is not a complete audit history or a timestamp of one particular field's last change.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Reverse the timestamp migration</div>
+        <pre><code class="language-sql" data-example="triggers-down">-- migrate:down
+DROP TRIGGER project_members_set_updated_at ON project_members;
+DROP TRIGGER tasks_set_updated_at ON tasks;
+DROP TRIGGER projects_set_updated_at ON projects;
+DROP TRIGGER user_profiles_set_updated_at ON user_profiles;
+DROP TRIGGER users_set_updated_at ON users;
+DROP FUNCTION set_updated_at();</code></pre>
+      </div>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>An insert default does not maintain updated_at on later updates.</li>
+        <li>A BEFORE UPDATE row trigger can change NEW and return it before storage.</li>
+        <li>Choose transaction-time, statement-time or other timestamp semantics intentionally.</li>
+        <li>Triggers run inside the caller's transaction; updated_at does not replace an audit log.</li>
+      </ul></div>
+
+      <h2>Connect the database work to the API</h2>
+      <ol class="flow">
+        <li><span class="flow-actor">Contract</span><span class="flow-title">Identify the permitted operation</span>
+          <p>Decide which caller can access which records, which inputs are allowed, and what the
+            response should contain.</p></li>
+        <li><span class="flow-actor">Boundary</span><span class="flow-title">Validate and normalize</span>
+          <p>Parse IDs, pagination and filters. Distinguish missing, null and invalid values and
+            obtain the verified caller identity.</p></li>
+        <li><span class="flow-actor">Service</span><span class="flow-title">Enforce business rules</span>
+          <p>Check ownership and workflow rules, choose any transaction boundary and pass explicit
+            application data to the repository.</p></li>
+        <li><span class="flow-actor">Repository</span><span class="flow-title">Execute safe SQL</span>
+          <p>Bind values, allowlist dynamic structure, use the appropriate joins and return selected
+            fields. Rely on declared constraints as a final integrity boundary.</p></li>
+        <li><span class="flow-actor">Response</span><span class="flow-title">Map the outcome</span>
+          <p>Serialize the public result or a safe error. Empty lists, missing items and conflicting
+            writes are distinct outcomes.</p></li>
+        <li><span class="flow-actor">Maintenance</span><span class="flow-title">Measure and evolve</span>
+          <p>Review query plans and real workloads, add justified indexes, evolve through migrations
+            and test backup restoration.</p></li>
+      </ol>
+      <h3>Check your understanding</h3>
+      <ul>
+        <li><strong>Does a valid UUID prove that a user exists?</strong> No; a foreign key enforces existence, and authorization is a separate check.</li>
+        <li><strong>Does one profile foreign key guarantee one profile?</strong> Only with a uniqueness or primary-key constraint on that reference.</li>
+        <li><strong>Can a parameter contain a sort direction?</strong> Not as SQL syntax; select a trusted fragment from validated choices.</li>
+        <li><strong>Does a UNIQUE email need another identical index?</strong> No; the constraint already creates its supporting index.</li>
+        <li><strong>Will a default timestamp change on UPDATE?</strong> No; use explicit update logic or a trigger.</li>
+        <li><strong>Can a down migration recover deleted records?</strong> Not by recreating the schema; data recovery requires a suitable recovery source.</li>
+      </ul>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li><strong>Model:</strong> choose types, keys, relationships, nullability and delete behavior from the domain.</li>
+        <li><strong>Evolve:</strong> review migrations and keep disposable test seeds separate.</li>
+        <li><strong>Query:</strong> authorize access, bind values and return explicit public fields.</li>
+        <li><strong>Coordinate:</strong> use transactions and concurrency controls for consistent changes.</li>
+        <li><strong>Optimize:</strong> measure indexes and document automatic behavior such as triggers.</li>
+      </ul></div>
+    </div>
+
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; a study guide for curious engineers.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+
+</div>
+
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</dialog>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>

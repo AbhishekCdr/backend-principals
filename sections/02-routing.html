@@ -6,13 +6,13 @@
 <title>Routing &middot; Backend Principles</title>
 <meta name="description" content="Notes on backend routing: method plus path as the handler key, static and dynamic routes, path params, query params, nested routes, versioning and catch-all routes.">
 <script>
-  /* set theme before first paint to avoid a flash of the wrong colours */
   (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     try {
-      var s = localStorage.getItem('bp-theme');
-      var t = s || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-      document.documentElement.setAttribute('data-theme', t);
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
     } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
   })();
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -21,14 +21,12 @@
 <link rel="stylesheet" href="../assets/css/main.css">
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 
 <header class="topbar">
-  <button class="icon-btn hamburger" id="hamburger" aria-label="Toggle navigation" aria-expanded="false">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
-  </button>
   <a class="brand" href="../index.html">
     <span class="brand-mark">bp</span>
-    <span class="brand-text">Backend Principles <span>/ notes</span></span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
   </a>
   <div class="topbar-spacer"></div>
   <div class="topbar-crumb" id="crumb"></div>
@@ -41,21 +39,24 @@
   <div class="progress" id="progress"></div>
 </header>
 
-<div class="nav-scrim" id="nav-scrim"></div>
-
 <div class="shell">
 
-  <aside class="sidebar" id="sidebar">
-    <p class="sidebar-title">Lessons</p>
-    <ul class="nav-list" id="nav-list"></ul>
-    <div class="sidebar-note">
-      <strong>How to read these.</strong> Every lesson ends each major part with a
-      <em>Key takeaways</em> box. If you are revising, read only those first, then dive
-      back into whatever felt shaky.
-    </div>
-  </aside>
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
 
-  <main class="main">
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
     <header class="lesson-head">
       <p class="eyebrow">Lesson 02</p>
       <h1>Routing</h1>
@@ -64,15 +65,6 @@
         expresses the <strong>where</strong>. Put the two together and the server has enough to pick
         exactly one piece of code to run. That mapping is all routing is.
       </p>
-      <div class="pills">
-        <span class="pill">method + path</span>
-        <span class="pill">static routes</span>
-        <span class="pill">path params</span>
-        <span class="pill">query params</span>
-        <span class="pill">nesting</span>
-        <span class="pill">versioning</span>
-        <span class="pill">catch-all</span>
-      </div>
     </header>
 
     <div class="prose">
@@ -147,6 +139,14 @@
         <em>kind</em> of response. A constant.
       </p>
 
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>A static route has no variable path segments: <code>/api/books</code>.</li>
+          <li>The path stays fixed; the data returned can still change.</li>
+        </ul>
+      </div>
+
       <h2>Dynamic routes and path parameters</h2>
       <p>
         Now the opposite case. Suppose you want to fetch the details of one specific user, identified
@@ -199,6 +199,14 @@
         <em>route parameter</em>). They are called path parameters because they sit directly after a
         forward slash &mdash; they are part of the path itself.
       </p>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>A path parameter identifies a resource: <code>/users/:id</code> matches <code>/users/123</code>.</li>
+          <li>Parameter syntax depends on the router. Extracted values need validation and deliberate conversion.</li>
+        </ul>
+      </div>
 
       <h2>Query parameters</h2>
       <p>
@@ -278,7 +286,7 @@
               <code>/users/:id</code>.</li>
           <li>Query params sit after <code>?</code> as key&ndash;value pairs and <em>modify</em> the
               request.</li>
-          <li>They exist because <code>GET</code> has no body.</li>
+          <li>Use query parameters for <code>GET</code> inputs; GET request content has no generally defined semantics.</li>
           <li>Pagination, filtering and sorting belong in the query string.</li>
         </ul>
       </div>
@@ -331,6 +339,14 @@
         of the same vocabulary. You will see nesting in essentially any API of more than trivial
         complexity.
       </p>
+
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>Nested paths express resource relationships: <code>/users/123/posts/456</code>.</li>
+          <li>Each supported level is a separate route. The URL alone does not enforce ownership or access.</li>
+        </ul>
+      </div>
 
       <h2>Route versioning and deprecation</h2>
       <p>
@@ -404,6 +420,15 @@
         </p>
       </div>
 
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>Versioning gives consumers a migration window for breaking changes.</li>
+          <li>Ship v2 alongside v1, announce deprecation, migrate consumers, then retire v1.</li>
+          <li>A path prefix such as <code>/api/v1/</code> is one explicit versioning strategy.</li>
+        </ul>
+      </div>
+
       <h2>The catch-all route</h2>
       <p>
         Finally: what happens when a request arrives for a route the server does not serve? Say
@@ -439,11 +464,8 @@ router.<span class="m">all</span>(<span class="str">"*"</span>, notFoundHandler)
       <div class="keytakeaways">
         <h4>Key takeaways</h4>
         <ul>
-          <li>Nesting expresses ownership; every level you stop at is its own route.</li>
-          <li>Version in the path (<code>/api/v1/</code>) so breaking changes get a migration window.</li>
-          <li>Register the <code>*</code> catch-all last, and return a real message instead of null.</li>
-          <li>With static routes, path params, query params, nesting and versioning you can read the
-              routing layer of essentially any backend codebase.</li>
+          <li>A fallback handles unmatched routes and returns a clear <code>404 Not Found</code> response.</li>
+          <li>In order-sensitive routers, register broad catch-all patterns after specific routes.</li>
         </ul>
       </div>
 
@@ -451,23 +473,20 @@ router.<span class="m">all</span>(<span class="str">"*"</span>, notFoundHandler)
     <nav class="pager" id="pager"></nav>
 
     <footer class="foot">
-      Backend Principles &mdash; course notes. Built as a static site, no dependencies.
+      Backend Principles &mdash; a study guide for curious engineers.
       &copy; <span id="year"></span>
     </footer>
   </main>
 
-  <nav class="toc" aria-label="On this page">
-    <p class="toc-title">On this page</p>
-    <ul id="toc-list"></ul>
-  </nav>
 
 </div>
 
-<div class="palette-backdrop" id="palette" role="dialog" aria-modal="true" aria-label="Search">
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
   <div class="palette">
     <div class="palette-input-wrap">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="palette-input" type="text" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
     </div>
     <div class="palette-results" id="palette-results"></div>
     <div class="palette-foot">
@@ -476,7 +495,7 @@ router.<span class="m">all</span>(<span class="str">"*"</span>, notFoundHandler)
       <span><span class="kbd">esc</span> close</span>
     </div>
   </div>
-</div>
+</dialog>
 
 <script src="../assets/js/app.js"></script>
 </body>

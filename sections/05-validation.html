@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Validations &amp; Transformations &middot; Backend Principles</title>
+<meta name="description" content="Notes on API validations and transformations: layered architecture, input schemas, type, syntax and semantic checks, cross-field rules, coercion, errors and frontend vs backend validation.">
+<script>
+  (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try {
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell">
+
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 05</p>
+      <h1>Validations &amp; Transformations</h1>
+      <p class="lead">
+        Before an API acts on client data, it needs two answers: <strong>is this input acceptable?</strong>
+        and <strong>what representation should the application use?</strong> Validation checks the
+        contract; transformation converts accepted input into a useful form. Together they protect
+        data integrity at the boundary of your backend.
+      </p>
+    </header>
+
+    <div class="prose">
+      <h2>Where the pipeline belongs</h2>
+      <p>
+        In a typical layered backend, a matched route leads to a controller, which calls a service,
+        which may call a repository. These layers divide responsibilities rather than prescribe a
+        particular framework.
+      </p>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Layer</th><th>Responsibility</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Controller</strong></td><td>HTTP input, response shape and status codes;
+              pass validated input to the appropriate service.</td></tr>
+            <tr><td><strong>Service</strong></td><td>Business rules and orchestration: repository calls,
+              notifications, emails or webhooks. A service need not use a database.</td></tr>
+            <tr><td><strong>Repository</strong></td><td>Persistence operations: query, insert, update and
+              delete in PostgreSQL, Redis or another store.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ol class="flow">
+        <li><span class="flow-actor">Request</span><span class="flow-title">Match a route and parse the input</span>
+          <p>The method and path select the handler. The body parser turns JSON text into values.</p></li>
+        <li><span class="flow-actor">Boundary</span><span class="flow-title">Validate and transform</span>
+          <p>Apply that route's schema in middleware, a framework pipeline or a shared function at the
+            start of the controller. Reject invalid input before business side effects.</p></li>
+        <li><span class="flow-actor">Application</span><span class="flow-title">Execute the service</span>
+          <p>Use the validated result to perform business logic and any persistence work.</p></li>
+        <li><span class="flow-actor">Response</span><span class="flow-title">Return through the controller</span>
+          <p>Serialize the result into the API's response format and send the appropriate HTTP status.</p></li>
+      </ol>
+      <p>
+        Exact middleware order varies. Request size limits may run before parsing; authentication can
+        run before route-specific validation. The invariant is to validate external input before using
+        it for business operations. State-dependent rules, such as available stock, still belong in
+        the service and persistence layers where they can be enforced correctly.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Controller = HTTP; service = business logic; repository = persistence.</li>
+        <li>Validate at the input boundary before database writes, emails or other side effects.</li>
+        <li>Boundary checks complement business rules and database constraints.</li>
+      </ul></div>
+
+      <h2>A schema is the input contract</h2>
+      <p>
+        Validate every input source your API consumes: <strong>body, query parameters, path parameters
+        and headers</strong>. A successfully parsed JSON body is only valid JSON; it is not necessarily
+        valid data for this endpoint. A schema spells out required fields, types and constraints.
+      </p>
+      <p>For a book-creation endpoint, suppose <code>name</code> must be a string of 5&ndash;100 characters:</p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Payload</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td><code>{}</code></td><td>Reject: <code>name</code> is required.</td></tr>
+          <tr><td><code>{"name": null}</code></td><td>Reject: present, but not a string.</td></tr>
+          <tr><td><code>{"name": 0}</code></td><td>Reject: wrong type.</td></tr>
+          <tr><td><code>{"name": "Go"}</code></td><td>Reject: fewer than 5 characters.</td></tr>
+          <tr><td><code>{"name": "Designing Data Systems"}</code></td><td>Accept: type and length match.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Also decide whether empty strings and <code>null</code> are allowed, what happens to unknown
+        fields, and which defaults apply. Optional means a field may be absent; nullable means it may
+        explicitly contain <code>null</code>. Those are different promises. If trimming names is part
+        of your contract, check the length after trimming.
+      </p>
+      <div class="callout callout--warn"><div class="callout-label">Do not pass arbitrary fields through</div>
+        <p>Choose to reject or discard unknown fields. A client-supplied <code>isAdmin</code> must not
+          become a writable property just because the request body was passed straight into a model.</p>
+      </div>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Check presence, type, then constraints; valid JSON alone proves none of these.</li>
+        <li>Cover the body, query, path and consumed headers, including nested fields.</li>
+        <li>Define optional, nullable, default and unknown-field behavior explicitly.</li>
+      </ul></div>
+
+      <h2>Type, syntactic and semantic validation</h2>
+      <p>These categories overlap; they are useful ways to ask what a check proves.</p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Kind</th><th>Question</th><th>Example</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Type</strong></td><td>Is the value the expected kind?</td>
+            <td><code>age</code> is a number, <code>married</code> a boolean,
+              <code>tags</code> an array of strings.</td></tr>
+          <tr><td><strong>Syntactic</strong></td><td>Does its structure match the format?</td>
+            <td><code>reader@example.com</code> is email-shaped;
+              <code>1995-06-12</code> follows <code>YYYY-MM-DD</code>.</td></tr>
+          <tr><td><strong>Semantic</strong></td><td>Does the value make sense in this context?</td>
+            <td>A birth date exists on the calendar and is not in the future;
+              an age is within the application's allowed range.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Format is not proof</h3>
+      <p>
+        <code>test.com</code> is not an email address: it lacks a local part and <code>@</code>.
+        Even a well-formed email does not prove that the mailbox exists or belongs to the user;
+        that needs a verification flow. Phone numbers need a documented national or international
+        format, not an assumption that every country uses ten digits. Store them as strings to
+        preserve leading zeroes and the country-code prefix.
+      </p>
+      <p>
+        Likewise, <code>2025-02-30</code> has the right date shape but is not a real calendar date.
+        Compare birth dates to the current date under a defined timezone policy, not to a hard-coded
+        year from a demo. The lecture's age range of 1&ndash;120 is an example product rule, not a
+        universal rule for every application.
+      </p>
+      <h3>Validate inside collections too</h3>
+      <div class="msg"><div class="msg-head"><span class="dot"></span> Type-validation example</div>
+<pre><code>{
+  "stringField": "notes",
+  "numberField": 10,
+  "arrayField": ["one", "two"],
+  "booleanField": false
+}</code></pre></div>
+      <p>
+        If <code>arrayField</code> becomes <code>[1, 2]</code>, it is still an array but its elements
+        fail the string rule. Report the element path, such as <code>arrayField[0]</code>. Similarly,
+        the JSON string <code>"false"</code> is not the boolean <code>false</code>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Type checks the kind; syntax checks the structure; semantics checks the meaning.</li>
+        <li>Validate array elements and nested properties, not just their containers.</li>
+        <li>Valid email or phone syntax does not prove ownership; a date shape does not prove a real date.</li>
+      </ul></div>
+
+      <h2>Cross-field and conditional rules</h2>
+      <p>
+        Some contracts depend on several fields together. A schema can express these relationships
+        as well as individual field constraints.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Rule</th><th>What to enforce</th></tr></thead>
+        <tbody>
+          <tr><td>Password confirmation</td><td><code>passwordConfirmation</code> equals
+            <code>password</code>, and the password independently satisfies the password policy.
+            The lecture's eight-character minimum is only a demo constraint.</td></tr>
+          <tr><td>Conditional partner name</td><td>When <code>married</code> is <code>true</code>,
+            require a non-empty <code>partner</code> string. When false, the field may be absent;
+            if present, it still needs a valid type.</td></tr>
+          <tr><td>Related dates</td><td><code>startDate</code> must not be after <code>endDate</code>.</td></tr>
+          <tr><td>Age and birth date</td><td>If you collect both, check their consistency under your
+            date policy. Prefer deriving age from birth date when possible.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Password confirmation catches typing mistakes; it is not an authentication mechanism.
+        Never echo passwords in a demo response or log them as part of a validation failure.
+        A successful request can return an acknowledgement or safe fields instead.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Cross-field checks compare values; conditional checks change requirements based on another field.</li>
+        <li>Passing each field's own constraints does not prove that the fields agree.</li>
+        <li>Confirmation checks do not replace password security; keep secrets out of responses and logs.</li>
+      </ul></div>
+
+      <h2>Fail early with useful errors</h2>
+      <p>
+        Without boundary validation, <code>{"name": 0}</code> can reach a service that expects a string,
+        cause an exception or reach persistence with the wrong meaning. You have already spent work
+        and may have performed side effects before discovering the problem.
+      </p>
+      <div class="callout callout--note"><div class="callout-label">A database is not your input schema</div>
+        <p>A number inserted into a text column does <strong>not necessarily fail</strong>: a driver or
+          database can convert it to text. PostgreSQL permits assignment conversions to string types.
+          Even <code>TEXT NOT NULL</code> does not enforce a 5&ndash;100-character book name.
+          See <a href="https://www.postgresql.org/docs/current/typeconv-query.html">PostgreSQL's value-storage conversion rules</a>.</p>
+      </div>
+      <p>
+        Reject a contract violation with <code>400 Bad Request</code>, or use
+        <code>422 Unprocessable Content</code> consistently for well-formed but invalid input.
+        Reserve <code>500</code> for unexpected server failures. Known database constraint violations
+        can also be mapped to an appropriate client error; database errors are not automatically 500s.
+      </p>
+      <div class="msg"><div class="msg-head"><span class="dot dot--res"></span> Example validation response</div>
+<pre><code>HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "VALIDATION_FAILED",
+  "details": [
+    { "field": "email", "code": "invalid_format", "message": "Use a valid email address." },
+    { "field": "phone", "code": "invalid_type", "message": "Phone must be a string." }
+  ]
+}</code></pre></div>
+      <p>
+        An empty body object may produce several required-field errors. Fixing the email may leave
+        only the phone error; fixing both allows execution to continue. Field paths and stable error
+        codes help a client put messages beside inputs. These messages support API documentation,
+        but do not replace it. Unlike ordinary format errors, login errors should avoid revealing
+        whether an account exists, as discussed in <a href="04-auth.html">Lesson 04</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Reject invalid requests before side effects; return clear field-level 4xx errors.</li>
+        <li>Database coercion may accept wrong input; retain database constraints as a separate safeguard.</li>
+        <li>Use safe error messages without stack traces, passwords or account-existence leaks.</li>
+      </ul></div>
+
+      <h2>Transformation: from wire values to application values</h2>
+      <p>
+        Transformation changes a value's representation: parsing a numeric string, trimming a name
+        or normalizing a date. Validation decides whether a value is allowed. They work together;
+        a successful conversion does not prove that the resulting value is acceptable.
+      </p>
+      <div class="msg"><div class="msg-head"><span class="dot"></span> Pagination from Lesson 02</div>
+<pre><code>GET /bookmarks?page=2&amp;limit=20
+
+Raw query values:    { "page": "2", "limit": "20" }
+Validated result:    { "page": 2,   "limit": 20   }</code></pre></div>
+      <p>
+        Query values arrive as text before framework-specific parsing. A schema that immediately
+        insists on numbers rejects a perfectly reasonable request. Transform at the boundary, then
+        validate the numeric result. For the lecture's example, require integer
+        <code>0 &lt; page &lt; 500</code> and <code>0 &lt; limit &lt; 10000</code>.
+        These are illustrative ceilings; choose limits your service can afford.
+      </p>
+      <ol class="flow">
+        <li><span class="flow-title">Check the raw representation</span><p>Require one value per field
+          and an accepted integer string. Reject blank values, arrays, repeated parameters and
+          trailing junk such as <code>2abc</code> under this contract.</p></li>
+        <li><span class="flow-title">Convert deliberately</span><p>Parse the whole value as a number.
+          Do not use a permissive parser that silently accepts only a numeric prefix.</p></li>
+        <li><span class="flow-title">Check the converted value</span><p>Require a finite integer in range:
+          pages 1&ndash;499, limits 1&ndash;9999. Reject zero, negatives, fractions and overflow.</p></li>
+        <li><span class="flow-title">Pass the validated result onward</span><p>The service receives the
+          parsed values, not the original request object. Defaults such as page 1 and limit 20
+          may apply to missing fields, but should not silently replace invalid values.</p></li>
+      </ol>
+      <div class="callout callout--warn"><div class="callout-label">Coercion is not permission</div>
+        <p>Generic truthiness can turn the string <code>"false"</code> into true. Some numeric
+          conversions turn an empty string into zero. Accept only documented representations,
+          then check the result. Never turn invalid data into plausible-looking data by accident.</p>
+      </div>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Transformation changes representation; validation checks acceptance.</li>
+        <li>Check raw input &rarr; convert &rarr; check the result &rarr; pass that result to the service.</li>
+        <li>For pagination, require bounded integers; reject ambiguous input and default only missing values.</li>
+      </ul></div>
+
+      <h2>Normalization needs an explicit policy</h2>
+      <p>
+        Transformations may happen before a check or after it, depending on what the check needs.
+        Keep their ordering beside the schema so the complete input contract is easy to find.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Input</th><th>Possible transformation</th><th>Boundary to respect</th></tr></thead>
+        <tbody>
+          <tr><td><code>Reader@EXAMPLE.COM</code></td><td><code>Reader@example.com</code></td>
+            <td>Lowercase the domain. Lowercasing the whole address requires an explicit account policy:
+              the local part can be case-sensitive under
+              <a href="https://www.rfc-editor.org/rfc/rfc5321.html#section-2.4">SMTP's rules</a>.</td></tr>
+          <tr><td>A national phone number</td><td>A validated international representation</td>
+            <td>Use known country context. Blindly prepending <code>+</code> does not make an arbitrary
+              number valid or infer its country.</td></tr>
+          <tr><td><code>1995-06-12</code></td><td>An internal calendar-date value</td>
+            <td>A birth date is not an instant. Do not invent midnight UTC and accidentally shift the
+              date when displaying it in another timezone.</td></tr>
+          <tr><td><code>"  Ada Lovelace  "</code></td><td><code>"Ada Lovelace"</code></td>
+            <td>Trim if the name contract allows it, then validate its length. Never apply generic
+              trimming or lowercasing to passwords.</td></tr>
+        </tbody>
+      </table></div>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Normalize only when the contract defines the change and preserves the intended meaning.</li>
+        <li>Email casing, phone country context and date timezones need deliberate decisions.</li>
+        <li>Keep transformations and checks together; do not silently alter secrets.</li>
+      </ul></div>
+
+      <h2>Frontend and backend validation work together</h2>
+      <div class="cards cards--2">
+        <div class="card"><h4>Frontend: immediate feedback</h4><p>Show a missing field or malformed email
+          before submitting. This helps the user correct mistakes quickly and avoids unnecessary requests.</p></div>
+        <div class="card"><h4>Backend: enforce the contract</h4><p>Check every request, regardless of who
+          sent it. A script, mobile app, Postman or Insomnia can bypass your web form completely.</p></div>
+      </div>
+      <p>
+        In a form, an invalid email can stop submission before an API call happens. Once the form
+        looks valid, the request reaches the server and the server checks it again. Shared schema
+        definitions can reduce drift, but executing those rules in the browser does not remove the
+        server's responsibility.
+      </p>
+      <div class="callout callout--key"><div class="callout-label">Security has several layers</div>
+        <p>Validation supports data integrity; it does not replace authorization, parameterized database
+          queries or context-aware output encoding. See the
+          <a href="https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html">OWASP input validation guidance</a>.</p>
+      </div>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Frontend validation improves user experience; backend validation enforces the input contract.</li>
+        <li>Every client can bypass the web form. The server must validate independently.</li>
+        <li>Validation complements authorization and injection defenses; it does not replace them.</li>
+      </ul></div>
+
+      <h2>Designing an API: the checklist</h2>
+      <p>For each endpoint, be able to explain its input contract before writing its business logic.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li><strong>Sources:</strong> which body fields, query/path parameters and headers do you consume?</li>
+        <li><strong>Shape:</strong> which fields are required, optional or nullable, and what are their types?</li>
+        <li><strong>Constraints:</strong> which lengths, ranges, formats, nested and cross-field rules apply?</li>
+        <li><strong>Transformations:</strong> what do you parse or normalize, in what order, and what is rejected?</li>
+        <li><strong>Errors:</strong> can clients identify and fix a failure without receiving sensitive details?</li>
+        <li><strong>Execution:</strong> does only validated output reach business operations, with domain
+          rules and database constraints still enforced?</li>
+      </ul></div>
+    </div>
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; a study guide for curious engineers.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+
+</div>
+
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</dialog>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>

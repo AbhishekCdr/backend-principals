@@ -6,13 +6,13 @@
 <title>Authentication & Authorization &middot; Backend Principles</title>
 <meta name="description" content="Notes on authentication and authorization: sessions, JWTs and cookies, stateful vs stateless auth, API keys, OAuth 2.0 and OIDC, RBAC, and timing attacks.">
 <script>
-  /* set theme before first paint to avoid a flash of the wrong colours */
   (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     try {
-      var s = localStorage.getItem('bp-theme');
-      var t = s || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-      document.documentElement.setAttribute('data-theme', t);
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
     } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
   })();
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -21,14 +21,12 @@
 <link rel="stylesheet" href="../assets/css/main.css">
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 
 <header class="topbar">
-  <button class="icon-btn hamburger" id="hamburger" aria-label="Toggle navigation" aria-expanded="false">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
-  </button>
   <a class="brand" href="../index.html">
     <span class="brand-mark">bp</span>
-    <span class="brand-text">Backend Principles <span>/ notes</span></span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
   </a>
   <div class="topbar-spacer"></div>
   <div class="topbar-crumb" id="crumb"></div>
@@ -41,21 +39,24 @@
   <div class="progress" id="progress"></div>
 </header>
 
-<div class="nav-scrim" id="nav-scrim"></div>
-
 <div class="shell">
 
-  <aside class="sidebar" id="sidebar">
-    <p class="sidebar-title">Lessons</p>
-    <ul class="nav-list" id="nav-list"></ul>
-    <div class="sidebar-note">
-      <strong>How to read these.</strong> Every lesson ends each major part with a
-      <em>Key takeaways</em> box. If you are revising, read only those first, then dive
-      back into whatever felt shaky.
-    </div>
-  </aside>
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
 
-  <main class="main">
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
     <header class="lesson-head">
       <p class="eyebrow">Lesson 04</p>
       <h1>Authentication &amp; Authorization</h1>
@@ -66,18 +67,6 @@
         <em>&ldquo;what can you do?&rdquo;</em> &mdash; the permissions and capabilities that identity
         carries. Everything below is machinery for answering one or the other.
       </p>
-      <div class="pills">
-        <span class="pill">history</span>
-        <span class="pill">sessions</span>
-        <span class="pill">JWT</span>
-        <span class="pill">cookies</span>
-        <span class="pill">stateful vs stateless</span>
-        <span class="pill">API keys</span>
-        <span class="pill">OAuth 2.0</span>
-        <span class="pill">OIDC</span>
-        <span class="pill">RBAC</span>
-        <span class="pill">timing attacks</span>
-      </div>
     </header>
 
     <div class="prose">
@@ -1275,32 +1264,37 @@
         security details &mdash; generic errors and equal response times &mdash; that separate a
         working implementation from a safe one.
       </p>
+      <div class="keytakeaways">
+        <h4>Key takeaways</h4>
+        <ul>
+          <li>Authentication establishes identity; authorization checks permission for an operation.</li>
+          <li>Sessions, JWTs and cookies are primitives; choose a strategy that fits your trust and revocation needs.</li>
+          <li>Enforce permissions on the server and avoid leaking account information through failures.</li>
+        </ul>
+      </div>
       <div class="callout callout--tip">
-        <div class="callout-label">Coming next</div>
-        <p>Validations and transformations.</p>
+        <div class="callout-label">Continue learning</div>
+        <p><a href="05-validation.html">Validations and transformations</a>: check the data before acting on it.</p>
       </div>
 
     </div>
     <nav class="pager" id="pager"></nav>
 
     <footer class="foot">
-      Backend Principles &mdash; course notes. Built as a static site, no dependencies.
+      Backend Principles &mdash; a study guide for curious engineers.
       &copy; <span id="year"></span>
     </footer>
   </main>
 
-  <nav class="toc" aria-label="On this page">
-    <p class="toc-title">On this page</p>
-    <ul id="toc-list"></ul>
-  </nav>
 
 </div>
 
-<div class="palette-backdrop" id="palette" role="dialog" aria-modal="true" aria-label="Search">
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
   <div class="palette">
     <div class="palette-input-wrap">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="palette-input" type="text" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
     </div>
     <div class="palette-results" id="palette-results"></div>
     <div class="palette-foot">
@@ -1309,7 +1303,7 @@
       <span><span class="kbd">esc</span> close</span>
     </div>
   </div>
-</div>
+</dialog>
 
 <script src="../assets/js/app.js"></script>
 </body>

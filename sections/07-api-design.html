@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Design &middot; Backend Principles</title>
+<meta name="description" content="Design REST-style APIs with clear resources, routes, HTTP methods, idempotency, pagination, sorting, filtering, custom actions, consistent payloads, status codes and OpenAPI documentation.">
+<script>
+  (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try {
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell">
+
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 07</p>
+      <h1>API Design</h1>
+      <p class="lead">
+        An API is a contract that other people build on. Design its <strong>resources, routes,
+        methods, payloads and responses</strong> before writing the implementation. Consistent
+        choices let consumers spend less time guessing and more time building useful features.
+      </p>
+    </header>
+
+    <div class="prose">
+      <h2>Design the contract before the implementation</h2>
+      <p>
+        API design decides how a consumer asks for work and understands the result. The contract
+        includes successful behavior, validation failures, permissions, defaults and retry behavior.
+        It should be understandable without reading the server's source code.
+      </p>
+      <p>
+        Start with user journeys, wireframes and product requirements. A project-management screen
+        might need to list projects, create a task, archive an organization or clone a project.
+        These interactions reveal the resources and operations your API needs. Public APIs,
+        integrations and background jobs may have no screen, so include their use cases too.
+      </p>
+      <ol class="flow">
+        <li><span class="flow-actor">Understand</span><span class="flow-title">Identify users and their goals</span>
+          <p>Read designs and discuss requirements. Establish who can perform each operation and
+            what information they need.</p></li>
+        <li><span class="flow-actor">Model</span><span class="flow-title">Identify resources and relationships</span>
+          <p>Organizations contain projects; projects contain tasks. Define their identities,
+            lifecycle and ownership alongside the storage model.</p></li>
+        <li><span class="flow-actor">Specify</span><span class="flow-title">Write requests and responses</span>
+          <p>Choose methods, paths, schemas, defaults, status codes and error behavior. Walk through
+            examples in an API client or an OpenAPI document.</p></li>
+        <li><span class="flow-actor">Review</span><span class="flow-title">Try the contract as a consumer</span>
+          <p>Check empty results, bad input, retries and missing permissions. Then implement and
+            verify the behavior against that contract.</p></li>
+      </ol>
+      <div class="callout callout--key">
+        <div class="callout-label">Three different kinds of guidance</div>
+        <p>HTTP defines protocol semantics, REST defines architectural constraints, and an API style
+          guide defines choices such as plural nouns or camelCase. Keep these distinct. Consistency
+          helps consumers, but it does not replace documented behavior.</p>
+      </div>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Start with user needs and operations, then design concrete request/response contracts.</li>
+        <li>Describe failures, permissions and defaults alongside successful responses.</li>
+        <li>Distinguish HTTP requirements, REST constraints and team naming conventions.</li>
+      </ul></div>
+
+      <h2>Where REST comes from</h2>
+      <p>
+        Tim Berners-Lee proposed the Web at CERN in 1989 and developed its first browser/editor and
+        server in 1990. The Web is a system built on the Internet, not the beginning of the Internet
+        itself. Its early development brought together resource identifiers, HTTP and HTML.
+        <a href="https://www.w3.org/History.html">W3C's history of the Web</a>.
+      </p>
+      <p>
+        As the Web grew, shared interfaces, caching and intermediaries became essential to scaling it.
+        Roy Fielding described REST, <strong>Representational State Transfer</strong>, in his 2000
+        dissertation. REST is an architectural style, not a specification that mandates JSON,
+        plural route names or a particular framework.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Constraint</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Client–server</strong></td><td>Separate interface concerns from server responsibilities so the parts can evolve independently.</td></tr>
+          <tr><td><strong>Stateless</strong></td><td>Each request carries the information needed to understand it, without relying on stored conversational context from earlier requests.</td></tr>
+          <tr><td><strong>Cacheable</strong></td><td>Response semantics indicate whether reuse is allowed; appropriate caching reduces repeated work.</td></tr>
+          <tr><td><strong>Uniform interface</strong></td><td>Use resource identities, representations, self-descriptive messages and hypermedia controls.</td></tr>
+          <tr><td><strong>Layered system</strong></td><td>Clients can interact through proxies, gateways and caches without knowing every component behind them.</td></tr>
+          <tr><td><strong>Code on demand</strong></td><td>Optionally extend client behavior by transferring executable code, such as scripts.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        These constraints concern interactions across the system. REST's layered-system constraint
+        is distinct from organizing application code into controllers, services and repositories.
+        <a href="https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm">Fielding's REST chapter</a>
+        explains the rationale and tradeoffs.
+      </p>
+      <div class="callout callout--note">
+        <div class="callout-label">Stateless does not mean no database</div>
+        <p>Servers still store resource state: users, projects and tasks. Stateless interactions avoid
+          depending on a remembered conversation to interpret the next request. Request-local context
+          from Lesson 06 is also compatible with this: it exists during the current request.</p>
+      </div>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>REST is an architectural style for scalable interactions, not simply “JSON over HTTP.”</li>
+        <li>Its constraints are client–server, statelessness, caching, a uniform interface, layers and optional code on demand.</li>
+        <li>Persisted resources and context for the current request are compatible with stateless interactions.</li>
+      </ul></div>
+
+      <h2>Resources, representations and state</h2>
+      <p>
+        A <strong>resource</strong> is a concept your API identifies, such as a project, a collection
+        of tasks or the progress of a background operation. Its <strong>representation</strong> is
+        the data transferred about it. The same project could be represented as JSON for an API
+        consumer or HTML for a browser. Browsers can consume JSON too; the format is not determined
+        solely by whether the caller is another server.
+      </p>
+      <p>
+        Resource state includes attributes such as a task's title and completion status.
+        Application state describes the client's progress through an interaction. In REST's uniform
+        interface, links and available actions in representations guide those transitions
+        (<strong>hypermedia as the engine of application state</strong>, or HATEOAS). Exchanging
+        representations supports this interaction; it is more than copying database rows.
+      </p>
+      <h3>A project-management example</h3>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Resource</th><th>Example public fields</th><th>Relationship</th></tr></thead>
+        <tbody>
+          <tr><td>Organization</td><td><code>id</code>, <code>name</code>, <code>status</code>, <code>description</code></td><td>Contains projects.</td></tr>
+          <tr><td>Project</td><td><code>id</code>, <code>organizationId</code>, <code>name</code>, <code>status</code>, <code>description</code></td><td>Belongs to an organization; contains tasks.</td></tr>
+          <tr><td>Task</td><td><code>id</code>, <code>projectId</code>, <code>title</code>, <code>status</code></td><td>Belongs to a project.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Finding nouns in requirements is a useful starting heuristic. A resource does not have to
+        map one-to-one to a database table, however. A response may combine several tables or omit
+        internal fields. Develop the API contract and persistence model together rather than
+        exposing every database column automatically.
+      </p>
+      <p>
+        Many practical APIs called REST APIs use resource-oriented HTTP and JSON while leaving
+        hypermedia navigation out. This lesson focuses on designing those HTTP contracts clearly;
+        route naming alone does not establish all of REST's architectural properties.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>A resource is the identified concept; a representation is the data exchanged about it.</li>
+        <li>The uniform interface includes identification, representation-based manipulation, self-descriptive messages and hypermedia.</li>
+        <li>Model organizations, projects and tasks around consumer needs, not just database tables.</li>
+      </ul></div>
+
+      <h2>URLs, naming and versioning</h2>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>An example API URL</div>
+        <pre><code>https://api.example.com/v1/organizations/org-5/projects?page=2&amp;limit=20</code></pre>
+      </div>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Part</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>https</code></td><td>The scheme; use HTTPS for production traffic.</td></tr>
+          <tr><td><code>api.example.com</code></td><td>The host within the authority. An authority can also include a port.</td></tr>
+          <tr><td><code>/v1</code></td><td>A chosen major API version prefix.</td></tr>
+          <tr><td><code>/organizations/org-5/projects</code></td><td>A path identifying the projects collection within an organization.</td></tr>
+          <tr><td><code>?page=2&amp;limit=20</code></td><td>Query parameters selecting a portion of the collection.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        A fragment such as <code>#details</code> is interpreted by the client and is not sent in the
+        HTTP request target. It cannot be used to select a backend operation. An API subdomain and
+        a <code>/v1</code> prefix are common choices, not requirements; an API can also live under
+        <code>/api</code> on the main host.
+      </p>
+      <h3>Choose a readable path convention</h3>
+      <ul>
+        <li>Use plural collection names consistently: <code>/books</code> and <code>/books/book-42</code>.</li>
+        <li>Use lowercase static path segments and hyphens between words, such as <code>/project-templates</code>.</li>
+        <li>Use a human-readable slug when appropriate: <code>Harry Potter</code> can become <code>harry-potter</code>.</li>
+        <li>Define slug uniqueness, changes and redirects. A title-derived slug is not automatically a stable identity.</li>
+        <li>Preserve opaque IDs exactly; do not lowercase arbitrary identifiers or tokens.</li>
+      </ul>
+      <p>
+        Underscores are legal URI characters, and encoded spaces can occur in URLs. Hyphenated
+        lowercase names are a readability convention. Paths can be case-sensitive, so consistency
+        matters. <a href="https://www.rfc-editor.org/rfc/rfc3986.html#section-2.3">URI character rules</a>.
+      </p>
+      <p>
+        Nesting can express relationships, but avoid paths that reproduce every level of the
+        database. A stable <code>/projects/project-9</code> can coexist with an organization's
+        project collection. For breaking contract changes, plan a version and migration policy;
+        not every new optional field needs a new version.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use consistent plural collection paths, readable names and stable resource identifiers.</li>
+        <li>Fragments stay on the client; query parameters and paths reach the server.</li>
+        <li>Pluralization, lowercase paths and version prefixes are design choices, not REST mandates.</li>
+        <li>Keep nesting purposeful and plan how consumers migrate across breaking changes.</li>
+      </ul></div>
+
+      <h2>Choose HTTP methods by their meaning</h2>
+      <p>
+        The method and path together identify an operation. <code>GET /organizations</code> lists
+        organizations, while <code>POST /organizations</code> can create one. They share a URL
+        because they act on the same collection in different ways.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Method</th><th>Intended operation</th><th>Example</th></tr></thead>
+        <tbody>
+          <tr><td><code>GET</code></td><td>Retrieve a representation without requesting a state change.</td><td>Read a project or list tasks.</td></tr>
+          <tr><td><code>POST</code></td><td>Process submitted data according to the target's semantics.</td><td>Create a project, clone one, or request an email.</td></tr>
+          <tr><td><code>PUT</code></td><td>Create or replace the state at a known target URI.</td><td>Replace a resource's client-writable representation.</td></tr>
+          <tr><td><code>PATCH</code></td><td>Apply changes described by a patch document.</td><td>Change a project's description.</td></tr>
+          <tr><td><code>DELETE</code></td><td>Remove the target resource's association with its current functionality.</td><td>Delete a task; physical data retention is an implementation concern.</td></tr>
+          <tr><td><code>HEAD</code></td><td>Retrieve GET-like response metadata without response content.</td><td>Check headers without downloading the representation.</td></tr>
+          <tr><td><code>OPTIONS</code></td><td>Discover communication options for a target.</td><td>Includes use in CORS preflight; it is not limited to CORS.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>PUT and PATCH are different contracts</h3>
+      <p>
+        Use PUT for replacement semantics and PATCH for a defined partial modification. Replacing
+        a public representation does not mean clients must supply server-owned fields such as
+        <code>createdAt</code>, nor every physical database column. Define writable fields and
+        what omission means. PATCH likewise needs an explicit patch format, not just the method name.
+      </p>
+      <p>
+        The choice follows the operation, not whether the frontend is a single-page or multi-page
+        application. Query parameters are useful for GET selections; headers and the path also
+        carry request information. Avoid relying on GET request bodies, which have no generally
+        defined semantics. <a href="https://www.rfc-editor.org/rfc/rfc9110.html#section-9">HTTP method semantics</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Method + path expresses the operation; collection URLs can support both GET and POST.</li>
+        <li>PUT replaces target state; PATCH applies a specified change; POST supports creation and other processing.</li>
+        <li>Document writable fields and omission behavior rather than treating PUT and PATCH interchangeably.</li>
+        <li>HEAD retrieves metadata without content; OPTIONS describes communication options.</li>
+      </ul></div>
+
+      <h2>Idempotency and safe retries</h2>
+      <p>
+        An operation is <strong>idempotent</strong> when repeating the same request has the same
+        intended effect on server state as performing it once. This describes the requested effect,
+        not identical response bodies or status codes. Another client may change a collection
+        between two GETs, and a repeated DELETE may report that the resource is already absent.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Method</th><th>Idempotent by HTTP semantics?</th><th>Reason / example</th></tr></thead>
+        <tbody>
+          <tr><td><code>GET</code>, <code>HEAD</code>, <code>OPTIONS</code></td><td>Yes; these are also safe methods.</td><td>The client is not requesting a resource mutation.</td></tr>
+          <tr><td><code>PUT</code></td><td>Yes.</td><td>Replacing the same target with the same state converges on that state.</td></tr>
+          <tr><td><code>DELETE</code></td><td>Yes.</td><td>The intended result remains that the target is removed.</td></tr>
+          <tr><td><code>PATCH</code></td><td>Not guaranteed.</td><td>Assigning a value can be idempotent; incrementing a counter or appending an item may not be.</td></tr>
+          <tr><td><code>POST</code></td><td>Not guaranteed.</td><td>Repeated creation or clone requests can create multiple resources.</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout callout--warn">
+        <div class="callout-label">PATCH is not automatically idempotent</div>
+        <p>“Set status to active” can have the same effect repeatedly. “Increase the estimate by one”
+          changes the result on every call. The patch format and operation determine retry behavior;
+          PATCH itself does not promise idempotency.
+          <a href="https://www.rfc-editor.org/rfc/rfc5789.html#section-2">PATCH specification</a>.</p>
+      </div>
+      <p>
+        Logging a request does not make a safe read unsafe: safety concerns the effect requested by
+        the client. Similarly, deleting a resource with a first response of 204 and a later response
+        of 404 can still be idempotent. An API can instead document 204 for an already absent target.
+      </p>
+      <h3>When the network fails after a write</h3>
+      <p>
+        A lost response does not tell the client whether the operation succeeded. If an API supports
+        idempotency keys for POST, retry with the same key and the same payload. The server must
+        associate the key with the caller and operation, prevent concurrent duplicate execution,
+        reject conflicting payloads and document how long the result is retained. A random header
+        alone provides no such protection.
+      </p>
+      <p>
+        For competing edits, conditional requests such as <code>If-Match</code> with an ETag can
+        protect against overwriting a newer version. Idempotency and concurrency control solve
+        different problems. See the <a href="01-http.html">HTTP lesson</a> for method properties
+        and conditional requests.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Idempotency concerns repeated intended effects, not identical responses.</li>
+        <li>GET, HEAD, OPTIONS, PUT and DELETE are idempotent; POST and PATCH are not guaranteed to be.</li>
+        <li>Retry creation and custom actions only according to the API's documented deduplication contract.</li>
+        <li>Use version conditions when you need to prevent lost updates from concurrent edits.</li>
+      </ul></div>
+
+      <h2>Design the organization CRUD contract</h2>
+      <p>
+        Use <code>https://api.example.com/v1</code> as the example base URL. These routes cover
+        creation, reading, partial updates and deletion. Braces denote path parameters to replace
+        with real identifiers, not literal text to send.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Operation</th><th>Method and path</th><th>Example success contract</th></tr></thead>
+        <tbody>
+          <tr><td>Create</td><td><code>POST /organizations</code></td><td>201 with the created representation and its Location.</td></tr>
+          <tr><td>List</td><td><code>GET /organizations</code></td><td>200 with a paginated collection.</td></tr>
+          <tr><td>Read one</td><td><code>GET /organizations/{organizationId}</code></td><td>200 with one organization.</td></tr>
+          <tr><td>Update</td><td><code>PATCH /organizations/{organizationId}</code></td><td>200 with the updated representation.</td></tr>
+          <tr><td>Delete</td><td><code>DELETE /organizations/{organizationId}</code></td><td>204 with no response body.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Create only from writable fields</h3>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Request — server defaults status to active</div>
+        <pre><code>POST /v1/organizations
+Content-Type: application/json
+
+{
+  "name": "Organization 1",
+  "description": "Our engineering workspace"
+}</code></pre>
+      </div>
+      <div class="msg">
+        <div class="msg-head"><span class="dot dot--res"></span>Response — created resource and its address</div>
+        <pre><code>HTTP/1.1 201 Created
+Content-Type: application/json
+Location: /v1/organizations/org-1
+
+{
+  "id": "org-1",
+  "name": "Organization 1",
+  "status": "active",
+  "description": "Our engineering workspace",
+  "createdAt": "2026-10-02T09:00:00Z",
+  "updatedAt": "2026-10-02T09:00:00Z"
+}</code></pre>
+      </div>
+      <p>
+        In this contract, IDs and timestamps are generated by the server or database. The public
+        response includes those fields without exposing internal columns. Other APIs may allow
+        client-assigned IDs, but that is a separate, explicit design choice.
+      </p>
+      <h3>Define how partial updates work</h3>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Request — update a description with JSON Merge Patch</div>
+        <pre><code>PATCH /v1/organizations/org-1
+Content-Type: application/merge-patch+json
+
+{
+  "description": "Updated workspace description"
+}</code></pre>
+      </div>
+      <p>
+        With JSON Merge Patch, omitted members remain unchanged and a null value removes a member.
+        Arrays are replaced as a whole. Apply the schema and business rules to the resulting state:
+        deleting a required name or changing a read-only ID should fail. Return the updated public
+        representation with 200, or document 204 if the operation returns no content.
+        <a href="https://www.rfc-editor.org/rfc/rfc7396.html">JSON Merge Patch specification</a>.
+      </p>
+      <h3>Read and delete use the same resource address</h3>
+      <p>
+        A GET for an existing <code>org-1</code> returns its representation. In this example, a
+        completed DELETE returns 204, and a subsequent GET returns 404. Define deletion's effects
+        on related projects and tasks, including any retention or recovery rules. A 204 response
+        still has a status and headers; its body is empty.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Collection routes support list/create; item routes support read/update/delete.</li>
+        <li>For creation, return the intended public resource and identify its address with Location.</li>
+        <li>Define the patch media type, missing-field behavior, null behavior and writable fields.</li>
+        <li>Document deletion's effect on related data as well as its HTTP response.</li>
+      </ul></div>
+
+      <h2>Pagination: return a bounded portion</h2>
+      <p>
+        A list endpoint should not grow into an unbounded download as the database grows. Pagination
+        limits database work, serialization, network transfer and client rendering per response.
+        A user viewing twenty items rarely needs every record on the first screen.
+      </p>
+      <p>
+        For this example, use <code>page=1</code> and <code>limit=20</code> when omitted, with a maximum
+        limit of 100. Accept positive integers and reject invalid values. Query values arrive as text,
+        so parse and validate them deliberately. These numbers are this API's policy, not REST rules.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Request — two organizations from the first page</div>
+        <pre><code>GET /v1/organizations?page=1&amp;limit=2</code></pre>
+      </div>
+      <div class="msg">
+        <div class="msg-head"><span class="dot dot--res"></span>Response — abbreviated list representations</div>
+        <pre><code>{
+  "data": [
+    { "id": "org-5", "name": "Organization 5", "status": "active" },
+    { "id": "org-4", "name": "Organization 4", "status": "active" }
+  ],
+  "total": 5,
+  "page": 1,
+  "limit": 2,
+  "totalPages": 3
+}</code></pre>
+      </div>
+      <p>
+        Suppose five organizations are ordered newest first. With a limit of two, the pages are:
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Page</th><th>Returned organizations</th><th>Metadata</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>Organization 5, Organization 4.</td><td><code>total: 5</code>, <code>totalPages: 3</code>.</td></tr>
+          <tr><td>2</td><td>Organization 3, Organization 2.</td><td>The same total and page count.</td></tr>
+          <tr><td>3</td><td>Organization 1.</td><td>The last page can contain fewer than the limit.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Offset pagination uses <code>offset = (page − 1) × limit</code>, with
+        <code>totalPages = ceil(total / limit)</code>. Here, <code>total</code> counts records matching
+        the current filters that the caller is allowed to see, not every record in a multi-tenant
+        database. In this contract, an out-of-range page returns 200 with an empty data array.
+      </p>
+      <h3>Know when page numbers are not enough</h3>
+      <p>
+        Inserts and deletes between calls can shift offsets, causing duplicates or skipped items.
+        Large offsets and exact counts can also be expensive. Cursor pagination instead returns an
+        opaque continuation token, often with <code>hasMore</code> or a next link. It works well for
+        feeds and large collections, but still needs stable ordering and defined behavior when data
+        changes. Exact totals are optional if the interface does not need them.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Bound list responses; document defaults, valid ranges and maximum page size.</li>
+        <li>With five records and a limit of two, page sizes are two, two and one.</li>
+        <li>Totals must match filters and the caller's authorized scope.</li>
+        <li>Use cursor pagination when large offsets or shifting collections make page numbers unsuitable.</li>
+      </ul></div>
+
+      <h2>Sorting, filtering and empty lists</h2>
+      <p>
+        Make list behavior predictable even when optional query parameters are absent. For this
+        API, default to <code>createdAt</code> descending, then <code>id</code> descending as a unique
+        tie-breaker. A database query without an explicit order does not promise a stable sequence;
+        ordering by a non-unique timestamp alone is also insufficient for deterministic pagination.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Parameter</th><th>Example</th><th>Contract</th></tr></thead>
+        <tbody>
+          <tr><td><code>sortBy</code></td><td><code>name</code></td><td>Allowlisted fields: name or createdAt; default createdAt.</td></tr>
+          <tr><td><code>sortOrder</code></td><td><code>asc</code></td><td>asc or desc; default desc. Retain a documented ID tie-breaker.</td></tr>
+          <tr><td><code>status</code></td><td><code>archived</code></td><td>Exact match against an allowed status; omitted means no status filter.</td></tr>
+          <tr><td><code>name</code></td><td><code>Organization 4</code></td><td>Exact name match in this example; document case sensitivity.</td></tr>
+        </tbody>
+      </table></div>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Combine filters and ordering</div>
+        <pre><code>GET /v1/organizations?status=active&amp;name=Organization%204&amp;sortBy=name&amp;sortOrder=asc</code></pre>
+      </div>
+      <p>
+        State whether filters combine with AND or OR; this example uses AND. Apply authorization
+        and filters before counting and paginating the results. Map allowed sort fields to known
+        database expressions and bind filter values safely. Do not insert arbitrary query text
+        into SQL, even when it is called a sort parameter.
+      </p>
+      <h3>Empty is a valid result; invalid input is a different result</h3>
+      <div class="msg">
+        <div class="msg-head"><span class="dot dot--res"></span>200 OK — valid filter with no matching organizations</div>
+        <pre><code>{
+  "data": [],
+  "total": 0,
+  "page": 1,
+  "limit": 20,
+  "totalPages": 0
+}</code></pre>
+      </div>
+      <p>
+        A valid collection with no matches returns an empty collection, not a missing-resource error.
+        But <code>status=banana</code> violates this API's status enum and should receive a validation
+        error. A missing <code>/organizations/org-missing</code> can return 404; so can a nested
+        collection whose required parent does not exist. “List endpoints never return 404” is too broad.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Specify a default sort and a unique tie-breaker; allowlist client-selectable sort fields.</li>
+        <li>Document filter matching and combination rules, then count and paginate the matching authorized records.</li>
+        <li>Valid filters with no matches return 200 and an empty collection.</li>
+        <li>Invalid filter values produce validation errors; missing resources or parents can produce 404.</li>
+      </ul></div>
+
+      <h2>Custom actions: archive, clone and send</h2>
+      <p>
+        Some operations are more naturally expressed as commands than basic field edits. POST
+        supports processing with application-specific semantics. A readable action endpoint can
+        make that intent explicit; the suffix is a chosen API convention, not prescribed REST syntax.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Operation</th><th>Example route</th><th>Possible success response</th></tr></thead>
+        <tbody>
+          <tr><td>Archive an organization.</td><td><code>POST /organizations/{organizationId}/archive</code></td><td>200 with the archived organization, or 204 without content.</td></tr>
+          <tr><td>Clone a project.</td><td><code>POST /projects/{projectId}/clone</code></td><td>201 with the new project and its Location.</td></tr>
+          <tr><td>Request an email delivery.</td><td><code>POST /email-deliveries</code></td><td>201 for a created delivery resource, or 202 for accepted asynchronous processing.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Archive is a domain operation</h3>
+      <p>
+        Archiving may affect related projects, tasks and notifications. Define those effects and the
+        permissions required. A dedicated archive endpoint can expose that workflow clearly.
+        A PATCH changing status can also be valid if its documented semantics include the same
+        workflow. Internal complexity alone does not determine the HTTP method.
+      </p>
+      <p>
+        Whichever contract you choose, prevent a generic status update from bypassing archive rules.
+        Do not automatically delete related data unless the product's archive behavior calls for it.
+        Document what happens if the organization is already archived and whether retries can
+        duplicate notifications.
+      </p>
+      <h3>Clone creates a new identity</h3>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Request — optional documented overrides</div>
+        <pre><code>POST /v1/projects/project-2/clone
+Content-Type: application/json
+
+{
+  "name": "Project 2 copy"
+}</code></pre>
+      </div>
+      <p>
+        Specify whether tasks, membership and other related data are copied, and whether the operation
+        is atomic. On synchronous creation, return 201 and identify the new project. The new ID must
+        distinguish the clone from its source. A missing source can return 404; a forbidden clone
+        must not proceed merely because the caller knows the source ID.
+      </p>
+      <p>
+        For long-running actions, 202 means accepted, not completed. Give the consumer a way to
+        observe progress, such as an operation resource. For actions that create records or send
+        messages, explicitly document retry and deduplication behavior.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>POST can express custom processing; action paths are a documented convention.</li>
+        <li>Archive can be an action or a state transition; enforce its business rules on every supported path.</li>
+        <li>A synchronous clone creates a resource, so 201 can be appropriate even for a custom action.</li>
+        <li>202 means work was accepted; document completion tracking, side effects and retry behavior.</li>
+      </ul></div>
+
+      <h2>Apply the same contract to projects and tasks</h2>
+      <p>
+        Consumers should be able to recognize the organization patterns when they encounter another
+        resource. Use the same collection/item distinction, pagination vocabulary and response
+        conventions. Add only the differences required by the resource's behavior.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Operation</th><th>Projects</th><th>Tasks</th></tr></thead>
+        <tbody>
+          <tr><td>Create</td><td><code>POST /projects</code></td><td><code>POST /tasks</code></td></tr>
+          <tr><td>List</td><td><code>GET /projects</code></td><td><code>GET /tasks</code></td></tr>
+          <tr><td>Read one</td><td><code>GET /projects/{projectId}</code></td><td><code>GET /tasks/{taskId}</code></td></tr>
+          <tr><td>Update</td><td><code>PATCH /projects/{projectId}</code></td><td><code>PATCH /tasks/{taskId}</code></td></tr>
+          <tr><td>Delete</td><td><code>DELETE /projects/{projectId}</code></td><td><code>DELETE /tasks/{taskId}</code></td></tr>
+        </tbody>
+      </table></div>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Create a project within an existing organization</div>
+        <pre><code>POST /v1/projects
+Content-Type: application/json
+
+{
+  "name": "Project 1",
+  "organizationId": "org-1",
+  "description": "Improve onboarding"
+}</code></pre>
+      </div>
+      <p>
+        This contract defaults the project status to <code>planned</code>. Validate that
+        <code>org-1</code> exists and that the authenticated caller can create projects there.
+        A foreign key checks a relationship's existence; it does not establish the caller's permission.
+      </p>
+      <p>
+        List projects within an organization using a documented filter such as
+        <code>GET /projects?organizationId=org-1</code>, or a nested collection such as
+        <code>GET /organizations/org-1/projects</code>. You do not need both unless consumers need
+        both. If the parent ID is in the path, avoid requiring the same value in the body without
+        defining how conflicting values are handled.
+      </p>
+      <p>
+        A task's create input similarly includes <code>projectId</code>, its title and any other
+        required fields. Check access to that parent, then use the same conventions for creation,
+        listing, partial updates and deletion. Do not add every CRUD endpoint automatically if the
+        product does not permit that operation.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Reuse method, route, pagination and response patterns across resources.</li>
+        <li>Validate parent IDs and the caller's authorization; knowing an ID is not permission.</li>
+        <li>Use nesting or parent filters deliberately and avoid ambiguous duplicate parent identifiers.</li>
+        <li>Expose operations required by the product, not every possible table mutation.</li>
+      </ul></div>
+
+      <h2>Consistent payloads and sensible defaults</h2>
+      <p>
+        Use the same name for the same concept: <code>description</code> should not become
+        <code>desc</code> in the next endpoint. This example uses camelCase for JSON fields and query
+        parameter names. JSON itself only requires object member names to be strings; it does not
+        mandate camelCase. Choose a convention and apply it consistently.
+        <a href="https://www.rfc-editor.org/rfc/rfc8259.html#section-4">JSON object syntax</a>.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Input</th><th>Example default</th><th>When the client supplies a value</th></tr></thead>
+        <tbody>
+          <tr><td><code>page</code></td><td>1.</td><td>Require a positive integer.</td></tr>
+          <tr><td><code>limit</code></td><td>20.</td><td>Require an integer from 1 to 100.</td></tr>
+          <tr><td><code>sortBy</code></td><td>createdAt.</td><td>Validate against that endpoint's allowed sort fields.</td></tr>
+          <tr><td><code>sortOrder</code></td><td>desc.</td><td>Accept only asc or desc.</td></tr>
+          <tr><td>Organization status on creation.</td><td>active.</td><td>Allow an override only if the contract and business rules permit it.</td></tr>
+          <tr><td>Project status on creation.</td><td>planned.</td><td>Apply its documented lifecycle rules.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Defaults should make ordinary requests convenient without hiding invalid input. Apply a
+        default when a field is absent according to the schema; do not silently replace an invalid
+        value with something else. Also distinguish omitted, null and empty-string values.
+      </p>
+      <p>
+        Only require information the operation needs. If an organization needs only a name, make
+        optional description and default status behavior explicit. Never infer permissions or
+        ownership from a convenience default. Accept allowed fields deliberately and choose whether
+        unknown or read-only input fields are rejected or ignored; avoid automatic unrestricted binding.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Keep names, casing and envelopes consistent; camelCase is a convention, not a JSON requirement.</li>
+        <li>Document defaults and bounds, and reject invalid supplied values.</li>
+        <li>Distinguish omission, null and empty values in create and update schemas.</li>
+        <li>Require necessary input and explicitly control which fields clients can write.</li>
+      </ul></div>
+
+      <h2>Status codes and useful error responses</h2>
+      <p>
+        Choose the status from the operation's outcome, not from the HTTP method alone. POST can
+        return 200 for completed processing, 201 for creation or 202 for accepted work. A DELETE
+        can return 200 with a result or 204 without one; asynchronous deletion can return 202.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Status</th><th>Typical use</th></tr></thead>
+        <tbody>
+          <tr><td><code>200 OK</code></td><td>A successful read, list, update or action returning content.</td></tr>
+          <tr><td><code>201 Created</code></td><td>A resource was created; identify it, commonly with Location.</td></tr>
+          <tr><td><code>202 Accepted</code></td><td>The request was accepted for processing that has not completed.</td></tr>
+          <tr><td><code>204 No Content</code></td><td>The operation succeeded and there is no response content.</td></tr>
+          <tr><td><code>400 Bad Request</code></td><td>Malformed input or invalid parameters under the API's validation policy.</td></tr>
+          <tr><td><code>401 Unauthorized</code></td><td>Valid authentication credentials are required; include an appropriate WWW-Authenticate challenge.</td></tr>
+          <tr><td><code>403 Forbidden</code></td><td>The caller is not permitted to perform the operation.</td></tr>
+          <tr><td><code>404 Not Found</code></td><td>The target is missing, or the API intentionally conceals its existence.</td></tr>
+          <tr><td><code>409 Conflict</code></td><td>The operation conflicts with current resource state, such as a uniqueness rule.</td></tr>
+          <tr><td><code>412 Precondition Failed</code></td><td>A supplied condition such as If-Match did not hold.</td></tr>
+          <tr><td><code>422 Unprocessable Content</code></td><td>A possible policy for well-formed content whose instructions cannot be processed.</td></tr>
+          <tr><td><code>429 Too Many Requests</code></td><td>A rate limit was exceeded.</td></tr>
+          <tr><td><code>500 Internal Server Error</code></td><td>An unexpected server failure; return a safe public message.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        This lesson's example uses 400 for validation failures. APIs that distinguish semantic body
+        errors with 422 should document that policy consistently. Do not return 200 for every error
+        and expect consumers to infer failure from an arbitrary message string.
+      </p>
+      <h3>Give clients a stable error shape</h3>
+      <p>
+        Problem Details is a standard error representation. Its common fields describe the problem
+        type, title, status and occurrence-specific detail; an API can add structured field errors
+        and a request ID. Consumers should use documented machine-readable identifiers, not parse
+        human prose. <a href="https://www.rfc-editor.org/rfc/rfc9457.html">Problem Details for HTTP APIs</a>.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot dot--res"></span>Example — reject an invalid status filter</div>
+        <pre><code>HTTP/1.1 400 Bad Request
+Content-Type: application/problem+json
+
+{
+  "type": "about:blank",
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "One or more query parameters are invalid.",
+  "errors": [
+    {
+      "field": "status",
+      "code": "INVALID_STATUS",
+      "message": "status must be active or archived"
+    }
+  ],
+  "requestId": "req-7f21"
+}</code></pre>
+      </div>
+      <p>
+        Here, <code>errors</code> and <code>requestId</code> are API-specific extensions. Keep response
+        status and body status aligned. Log internal diagnostics with the request ID, while excluding
+        stack traces, SQL details, credentials and other sensitive information from public responses.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Return status codes according to outcomes: completion, creation, acceptance or failure.</li>
+        <li>204 has no response body; 202 does not assert that the work has completed.</li>
+        <li>Use a consistent validation policy and stable machine-readable error information.</li>
+        <li>Problem Details provides a standard shape; keep sensitive diagnostics in server logs.</li>
+      </ul></div>
+
+      <h2>Document, review and evolve the contract</h2>
+      <p>
+        An OpenAPI description makes the HTTP contract readable by people and tools. It can describe
+        paths, methods, parameters, schemas, security requirements and responses independently of
+        the server's programming language. Tools such as Swagger UI can present an interactive
+        interface over that description. <a href="https://spec.openapis.org/oas/latest.html">OpenAPI specification</a>.
+      </p>
+      <p>
+        Insomnia or Postman collections are useful for trying concrete requests. Keep them consistent
+        with the documented contract, and keep both in step with the implementation. Examples should
+        include empty lists, validation failures, authentication failures, conflicts and asynchronous
+        outcomes as well as the successful path. An interactive page alone does not prove correctness.
+      </p>
+      <h3>Review the API as its next consumer</h3>
+      <ul>
+        <li><strong>Resources:</strong> are the identities and relationships clear without knowing the database schema?</li>
+        <li><strong>Operations:</strong> do method semantics match the requested effect, and are custom actions documented?</li>
+        <li><strong>Inputs:</strong> are writable fields, required values, defaults, null behavior and validation rules explicit?</li>
+        <li><strong>Collections:</strong> are pagination limits, deterministic ordering, filters, totals and empty results defined?</li>
+        <li><strong>Security:</strong> does every item, list and action respect the authenticated caller's scope?</li>
+        <li><strong>Outcomes:</strong> are response fields, status codes, errors and completion tracking predictable?</li>
+        <li><strong>Retries:</strong> can callers tell which operations are idempotent and how duplicate writes are prevented?</li>
+        <li><strong>Change:</strong> do consumers have an upgrade path for breaking changes, with updated documentation?</li>
+      </ul>
+      <p>
+        Keep the vocabulary consistent as resources are added. A consumer who has integrated the
+        organization endpoints should recognize the project and task patterns. Reserve implementation
+        choices for the server while making everything a consumer must rely on part of the contract.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Design concrete requests and responses before implementing handlers and business logic.</li>
+        <li>Maintain OpenAPI documentation and useful examples together with the code.</li>
+        <li>Review security, failures, retries and compatibility as part of API usability.</li>
+        <li>A good contract lets consumers predict behavior across resources with minimal guesswork.</li>
+      </ul></div>
+    </div>
+
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; a study guide for curious engineers.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+
+</div>
+
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</dialog>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>
