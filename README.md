@@ -16,6 +16,8 @@ The site itself has no framework, dependencies or build step.
 | 06 | [Layers, Middleware & Request Context](sections/06-request-lifecycle.html) | Internal request lifecycle, handlers/controllers, services, repository contracts, middleware ordering, error handling, verified identity, request IDs, deadlines & cancellation |
 | 07 | [API Design](sections/07-api-design.html) | REST constraints, resources & representations, URL conventions, methods & idempotency, CRUD contracts, pagination, sorting, filtering, custom actions, consistent payloads, errors & OpenAPI documentation |
 | 08 | [Databases & PostgreSQL](sections/08-databases.html) | Persistence, DBMS responsibilities, concurrency, relational vs document models, data types, constraints, relationships, migrations, seeding, safe queries, pagination, indexes & triggers |
+| 09 | [Caching](sections/09-caching.html) | Hits & misses, memory hierarchy, CDN & DNS caches, Redis, Valkey, Memcached, cache-aside, write-through, keys, TTLs, invalidation, eviction, sessions, rate limiting, stampedes & measurement |
+| 10 | [Background Jobs](sections/10-background-jobs.html) | Producers, brokers & workers, job payloads, durable handoff, acknowledgements, visibility timeouts, retries, idempotency, scheduling, chains, batches, async API contracts, scaling & monitoring |
 
 ## Running it
 
@@ -56,8 +58,8 @@ Opening `index.html` directly from the filesystem also works.
 
    ```js
    {
-     num: '09',
-     slug: '09-your-topic',
+     num: '11',
+     slug: '11-your-topic',
      title: 'Your Next Topic',
      blurb: 'One sentence for the home page card.',
      outcomes: ['First learning goal.', 'Second learning goal.', 'Third learning goal.'],
@@ -99,7 +101,9 @@ navigation, 200% text/zoom and printing.
 │   ├── 05-validation.html
 │   ├── 06-request-lifecycle.html
 │   ├── 07-api-design.html
-│   └── 08-databases.html
+│   ├── 08-databases.html
+│   ├── 09-caching.html
+│   └── 10-background-jobs.html
 ├── tests/revision.test.js          revision behavior and content coverage
 └── assets/
     ├── css/main.css                the whole design system

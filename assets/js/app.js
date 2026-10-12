@@ -72,6 +72,22 @@
       blurb: 'Model persistent data and connect API operations to safe, efficient PostgreSQL queries.',
       outcomes: ['Choose data types, constraints and relationships for a project-management schema.', 'Use migrations, seed data and parameterized queries to support API operations.', 'Explain concurrency, indexes and automatic timestamp updates with triggers.'],
       tags: ['databases', 'PostgreSQL', 'SQL', 'DBMS', 'persistence', 'relational', 'NoSQL', 'data types', 'constraints', 'foreign keys', 'relationships', 'migrations', 'dbmate', 'seeding', 'joins', 'parameterized queries', 'SQL injection', 'indexes', 'triggers', 'transactions']
+    },
+    {
+      num: '09',
+      slug: '09-caching',
+      title: 'Caching',
+      blurb: 'Reuse data and computation to reduce latency while managing freshness and failures.',
+      outcomes: ['Trace cache hits and misses across application, CDN, DNS and hardware caches.', 'Choose cache keys, read and write strategies, TTLs and eviction policies.', 'Distinguish disposable cached results from session and rate-limit state.'],
+      tags: ['caching', 'cache hit', 'cache miss', 'CDN', 'DNS', 'edge', 'PoP', 'RAM', 'Redis', 'Valkey', 'Memcached', 'ElastiCache', 'cache-aside', 'lazy loading', 'write-through', 'invalidation', 'TTL', 'eviction', 'LRU', 'LFU', 'sessions', 'rate limiting', 'stampede', 'freshness']
+    },
+    {
+      num: '10',
+      slug: '10-background-jobs',
+      title: 'Background Jobs',
+      blurb: 'Move slow work outside the request lifecycle and make queued tasks reliable.',
+      outcomes: ['Trace a task from producer and broker to worker and acknowledgement.', 'Design durable handoff, safe retries, idempotency and scheduling.', 'Scale and monitor one-off, recurring, chained and batch workflows.'],
+      tags: ['background jobs', 'background tasks', 'task queues', 'producer', 'consumer', 'worker', 'broker', 'enqueue', 'acknowledgement', 'visibility timeout', 'at-least-once', 'retries', 'exponential backoff', 'jitter', 'dead-letter queue', 'DLQ', 'idempotency', 'transactional outbox', 'cron', 'scheduling', 'batch', 'chains', 'push notifications', 'Celery', 'BullMQ', 'Asynq', 'RabbitMQ', 'Redis', 'SQS', 'monitoring']
     }
   ];
 

@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Background Jobs &middot; Backend Principles</title>
+<meta name="description" content="Backend background-job notes covering task queues, producers, workers, durable handoff, retries, acknowledgements, idempotency, scheduling, batch workflows, async APIs, scaling and monitoring.">
+<script>
+  (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try {
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell">
+
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 10</p>
+      <h1>Background Jobs</h1>
+      <p class="lead">
+        Keep requests responsive while slower work continues elsewhere. Learn how
+        <strong>producers, queues and workers</strong> hand off tasks, then make that handoff reliable
+        with durable state, acknowledgements, safe retries and clear progress reporting.
+      </p>
+    </header>
+
+    <div class="prose">
+      <h2>Work outside the request lifecycle</h2>
+      <p>
+        A <strong>background job</strong> is work whose completion is decoupled from the original
+        request and response. The API accepts the work, records enough information to carry it out,
+        and responds without waiting for the entire operation to finish. A worker performs the work later.
+      </p>
+      <p>
+        This makes sense when the caller can continue before the result is ready: sending an email,
+        resizing an image, encoding a video, generating a report or delivering a push notification.
+        Scheduled maintenance may have no originating HTTP request at all.
+      </p>
+      <div class="callout callout--key">
+        <p class="callout-label">Deferred does not mean unimportant</p>
+        <p>
+          Account deletion, verification emails and financial processing can be business-critical
+          even when they happen in the background. The distinction is whether the work must finish
+          before this response, not whether it matters. Deferred work still needs deadlines,
+          correctness guarantees and a recovery path.
+        </p>
+      </div>
+      <p>
+        Using <code>async</code> or <code>await</code> does not by itself create a durable background
+        job. An HTTP handler that awaits an email provider still delays its response. Starting an
+        untracked promise or thread and returning may lose work when the process restarts. A separate
+        worker deployment is common, although workers can also use threads or other concurrency models.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Background work completes independently of the original HTTP response.</li>
+        <li>Deferrable work can still be critical and time-sensitive.</li>
+        <li>Language-level asynchronous code alone does not provide durable job processing.</li>
+      </ul></div>
+
+      <h2>The signup email example</h2>
+      <p>
+        A signup handler validates input, hashes the password and records an unverified account.
+        It also needs to arrange a verification email. Calling the email provider inside the request
+        ties response latency to that provider, whose timeout or outage you cannot control.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Inline email call</th><th>Queued email task</th></tr></thead>
+        <tbody>
+          <tr><td>The response waits for the provider.</td><td>The response waits for durable acceptance of the work.</td></tr>
+          <tr><td>A provider error must be reconciled with an account that may already exist.</td><td>The account can remain unverified while delivery is pending or being retried.</td></tr>
+          <tr><td>Retry behavior is tied to the handler or another recovery mechanism.</td><td>A worker applies the configured retry policy outside the request.</td></tr>
+        </tbody>
+      </table></div>
+      <ol>
+        <li>Validate signup input and establish the account's unverified state.</li>
+        <li>Durably record the verification request and the intent to send its email.</li>
+        <li>Respond with an accurate account and delivery status.</li>
+        <li>A worker loads the verification request and calls the email provider.</li>
+        <li>Record the result; retry eligible failures within the verification deadline.</li>
+      </ol>
+      <p>
+        “Verification email queued” is different from “email delivered.” Provider acceptance also
+        does not prove that a message reached the recipient's inbox. A backlog or prolonged outage
+        can delay delivery well beyond a few seconds. Keep the account unverified until the user
+        completes verification, and provide a rate-limited resend flow.
+      </p>
+      <p>
+        Before sending, check whether the verification request is still valid, expired, replaced
+        or already completed. A retry must not send a superseded link or silently extend its lifetime.
+        These checks connect background processing to the rules in
+        <a href="04-auth.html">Authentication &amp; Authorization</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Queueing separates signup latency from email-provider latency.</li>
+        <li>Accepted work, provider acceptance and recipient delivery are different milestones.</li>
+        <li>Delayed verification jobs must respect expiry, supersession and account state.</li>
+      </ul></div>
+
+      <h2>Producer, broker and worker</h2>
+      <p>
+        Think of a task queue as a shared to-do list with rules for claiming, completing and retrying
+        work. It is more than an in-memory array: reliable operation depends on how ownership and
+        task state survive failures.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Two connected execution paths</div>
+        <pre><code>Client → API / producer → durable handoff → response
+                                  │
+                                  ▼
+                             task queue
+                                  │ claim a job
+                                  ▼
+                         worker → task handler
+                                  │
+                       complete / retry / fail</code></pre>
+      </div>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Component</th><th>Responsibility</th></tr></thead>
+        <tbody>
+          <tr><td>Producer</td><td>Create the task description and enqueue it. This may be an API, scheduler or another worker.</td></tr>
+          <tr><td>Broker / queue service</td><td>Store and deliver messages according to configured persistence, retention and delivery rules.</td></tr>
+          <tr><td>Worker / consumer</td><td>Claim work, validate its payload, run the registered handler and report the outcome.</td></tr>
+          <tr><td>Task handler</td><td>Perform the specific business operation, such as sending one verification email.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        A broker can manage many queues; the terms are related but not identical. Separate email,
+        reporting and media queues can keep slow video work from delaying verification messages.
+        Workers subscribe or poll according to the system; they do not have to continuously busy-wait.
+      </p>
+      <p>
+        The producer usually sends data and a task type, not a live function or request object.
+        Workers already contain the code that maps that type to a handler. They may share a repository
+        with the API while running as independently scaled processes.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>The producer describes work, the broker delivers it and the worker executes it.</li>
+        <li>A broker may host multiple queues with different worker pools.</li>
+        <li>Enqueueing a task is distinct from executing its handler.</li>
+      </ul></div>
+
+      <h2>Designing the job payload</h2>
+      <p>
+        A worker needs enough information to understand the intended operation after the request has
+        ended. JSON is a common transport format; deserialization produces the language's native
+        objects or structs. The job schema is a contract, like an API payload.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Illustrative task envelope — not a library-specific API</div>
+        <pre><code data-example="json">{
+  "jobId": "job-842",
+  "type": "sendVerificationEmail",
+  "schemaVersion": 1,
+  "userId": "user-17",
+  "verificationRequestId": "verification-63",
+  "requestedAt": "2026-10-12T10:00:00Z",
+  "expiresAt": "2026-10-12T10:15:00Z",
+  "correlationId": "request-918"
+}</code></pre>
+      </div>
+      <ul>
+        <li><strong>Stable identity:</strong> retain the same logical job or operation identity across retries.</li>
+        <li><strong>Explicit scope:</strong> include validated resource and tenant identifiers where applicable.</li>
+        <li><strong>Small payloads:</strong> refer to durably stored images, videos or report inputs rather than embedding large files.</li>
+        <li><strong>Versioned data:</strong> workers may receive jobs produced by an older deployment.</li>
+        <li><strong>Safe contents:</strong> avoid passwords and provider credentials; minimize personal data and restrict access to sensitive verification material.</li>
+      </ul>
+      <p>
+        Decide whether the worker should use an immutable snapshot or reload current state. A monthly
+        report needs an explicit reporting period and a defined data cutoff; a verification email
+        needs the still-valid verification request. Blindly reloading “whatever is current” can change
+        what the original task meant.
+      </p>
+      <p>
+        Validate the envelope at the worker boundary and allow only recognized task types. Treat
+        payloads as data, never arbitrary executable code. Carry correlation identifiers for debugging,
+        not the entire request context or reusable client credentials. See
+        <a href="03-serialization.html">Serialization</a> and <a href="05-validation.html">Validation</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use a small, versioned task contract with a stable operation identity.</li>
+        <li>Store large inputs durably and pass references with the required scope.</li>
+        <li>Validate again in the worker and define snapshot-versus-current-state behavior.</li>
+      </ul></div>
+
+      <h2>Queue technology and job libraries</h2>
+      <p>
+        A job library supplies application-facing handlers, retries and scheduling features. A broker
+        supplies messaging and storage behavior. Choose the combination by its guarantees and your
+        existing stack; these are different layers rather than interchangeable product categories.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Example</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td><a href="https://docs.celeryq.dev/en/stable/getting-started/introduction.html">Celery</a></td><td>A Python task-processing system that works with supported brokers, including RabbitMQ and Redis.</td></tr>
+          <tr><td><a href="https://docs.bullmq.io/guide/retrying-failing-jobs">BullMQ</a></td><td>A Redis-backed job library commonly used with Node.js.</td></tr>
+          <tr><td><a href="https://github.com/hibiken/asynq">Asynq</a></td><td>A Go task library backed by Redis.</td></tr>
+          <tr><td><a href="https://www.rabbitmq.com/docs/confirms">RabbitMQ</a></td><td>A message broker with producer confirmations and consumer acknowledgement mechanisms.</td></tr>
+          <tr><td><a href="https://docs.aws.amazon.com/general/latest/gr/sqs-service.html">Amazon SQS</a></td><td>A managed queue service with regional endpoints; using it does not automatically create one globally replicated queue.</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout callout--warn">
+        <p class="callout-label">Redis Pub/Sub is not a durable job queue</p>
+        <p>
+          Plain Redis Pub/Sub uses at-most-once delivery and does not retain a message for a
+          disconnected subscriber to process later. Redis-backed job libraries use additional data
+          structures and coordination; Redis Streams also has different delivery facilities.
+          <a href="https://redis.io/docs/latest/develop/pubsub/">Redis Pub/Sub delivery semantics</a>.
+        </p>
+      </div>
+      <p>
+        Persistence, replication, acknowledgement timing and retry defaults vary. Configure and test
+        them explicitly. Redis holding pending jobs is important workflow state, unlike a disposable
+        query cache: an eviction policy that silently removes job data is inappropriate. This is the
+        same distinction made in <a href="09-caching.html">Caching</a> for sessions and rate-limit state.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Separate the application job library from its broker or storage engine.</li>
+        <li>Plain Pub/Sub does not provide durable task delivery.</li>
+        <li>Verify persistence, retention, retries and deployment guarantees rather than assuming defaults.</li>
+      </ul></div>
+
+      <h2>Durable handoff and the transactional outbox</h2>
+      <p>
+        Creating an account and publishing its job are separate writes. If publication fails after
+        commit, no email is scheduled. Publishing first can expose data that never commits.
+      </p>
+      <p>
+        A <strong>transactional outbox</strong> saves the account and pending message in one database
+        transaction. A relay publishes committed messages and records broker confirmation. The API
+        acknowledges durable intent, not completed delivery. See the
+        <a href="https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html">transactional outbox pattern</a>.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Persist intent before acknowledging it</div>
+        <pre><code>One database transaction:
+  create unverified account
+  create verification request
+  create outbox message
+commit
+
+Relay:
+  publish committed message → broker confirmation → mark dispatched</code></pre>
+      </div>
+      <p>
+        Crashing between publication and marking dispatch can duplicate messages. Preserve their
+        identity and make consumers tolerate replay. A job table written in the same database
+        transaction can also provide durable handoff.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Database updates and broker publication have a failure gap.</li>
+        <li>An outbox durably couples a change to its intended follow-up.</li>
+        <li>Relay retries can duplicate messages; consumer idempotency remains necessary.</li>
+      </ul></div>
+
+      <h2>Acknowledgements, leases and visibility timeouts</h2>
+      <p>
+        Claiming a job should not automatically mean its work is complete. Reliable queues retain
+        enough state to recover uncompleted work. <strong>Producer confirmation</strong> establishes
+        broker acceptance; <strong>consumer acknowledgement</strong> reports processing completion.
+        Those are separate guarantees.
+        <a href="https://www.rabbitmq.com/docs/confirms">RabbitMQ confirmations and acknowledgements</a>.
+      </p>
+      <p>
+        With SQS, receiving a message temporarily hides it for a <strong>visibility timeout</strong>.
+        The worker explicitly deletes it after successful processing. If it is not deleted before
+        that timeout, it can be delivered again. The worker can extend visibility while legitimately
+        processing a longer task. Other systems use different acknowledgement, lock or lease mechanisms.
+        <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html">SQS visibility timeout</a>.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Setting</th><th>Question it answers</th></tr></thead>
+        <tbody>
+          <tr><td>Execution timeout</td><td>How long may this attempt run?</td></tr>
+          <tr><td>Visibility / lease duration</td><td>How long does this worker retain its claim?</td></tr>
+          <tr><td>Retry delay</td><td>When is another attempt eligible?</td></tr>
+          <tr><td>Job deadline / retention</td><td>When is the work obsolete, or no longer retained by the queue?</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        A lease expiring does not necessarily stop the original worker. Two attempts can overlap.
+        Acknowledging before required effects are safely recorded can lose work; crashing after an
+        effect but before acknowledgement can repeat it. Timeouts and acknowledgements help recovery,
+        but do not create exactly-once business effects.
+      </p>
+      <p>
+        <strong>At-least-once delivery</strong> permits repeated deliveries. Message retention and
+        failure policies still apply; it is not a guarantee that every business operation eventually
+        succeeds. Design the handler for duplicates as well as failures.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Broker acceptance and completed processing are different acknowledgements.</li>
+        <li>Visibility or lease expiry allows uncompleted work to be retried.</li>
+        <li>Plan for redelivery and overlapping attempts, even when using timeouts.</li>
+      </ul></div>
+
+      <h2>Retries, backoff and failed jobs</h2>
+      <p>
+        Retry errors that may resolve with time: a network timeout, temporary service outage or
+        provider throttling. Invalid payloads, unsupported task versions and permanent business
+        rejections need a different path. Retrying every error forever consumes capacity without
+        making the operation more likely to succeed.
+      </p>
+      <p>
+        <strong>Exponential backoff</strong> increases the delay between attempts. Add
+        <strong>jitter</strong>, a bounded random variation, to avoid many workers retrying together.
+        Cap attempts and delays, honor provider retry guidance, and stop when the task's deadline
+        makes further execution inappropriate.
+        <a href="https://docs.bullmq.io/guide/retrying-failing-jobs">BullMQ retry and backoff options</a>.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Example policy — five total attempts, before jitter</div>
+        <pre><code>Attempt 1: run when eligible
+Attempt 2: wait 1 minute after failure
+Attempt 3: wait 2 minutes after failure
+Attempt 4: wait 4 minutes after failure
+Attempt 5: wait 8 minutes after failure
+
+Total waiting before the last attempt: 15 minutes
+Plus queue delay and the time spent executing each attempt</code></pre>
+      </div>
+      <p>
+        That policy cannot assume a 15-minute verification link will still be useful at the final
+        attempt. External services can stay unavailable for much longer than a few retries. Choose
+        the policy from the task deadline and failure mode, not an assumed maximum provider outage.
+      </p>
+      <h3>When retrying stops</h3>
+      <p>
+        Exhausted or permanently failing jobs should enter a visible failed state or
+        <strong>dead-letter queue</strong> where supported and configured. Alert on them, retain enough
+        context to diagnose the cause, then replay deliberately after fixing it. A dead-letter queue
+        stores failures; it does not repair them. Replay must still respect expiry and idempotency.
+      </p>
+      <p>
+        Report failures using the library's expected error mechanism. Catching an exception, logging
+        it and returning success can cause the queue to acknowledge unfinished work. Avoid multiplying
+        retries across the HTTP client, handler and job library without a shared attempt budget.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Retry transient failures with bounded backoff and jitter.</li>
+        <li>Count total attempts separately from retries and include queue time in deadlines.</li>
+        <li>Surface permanent failures and exhausted jobs for diagnosis and controlled replay.</li>
+      </ul></div>
+
+      <h2>Idempotency: make repeated attempts safe</h2>
+      <p>
+        A job is <strong>idempotent</strong> when repeating the same logical operation produces the
+        same intended business outcome as completing it once. It may have side effects; those effects
+        must not multiply on redelivery. This extends the reasoning from
+        <a href="07-api-design.html">HTTP method idempotency</a> to worker execution.
+      </p>
+      <p>
+        Imagine a worker sends an email successfully, then crashes before recording success. The queue
+        retries it. A database rollback cannot unsend the email, just as it cannot undo an external
+        file deletion or payment. Transactions protect operations inside their scope; they do not
+        automatically make an entire distributed workflow idempotent.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Operation</th><th>Possible protection</th></tr></thead>
+        <tbody>
+          <tr><td>Create a weekly report</td><td>Use a unique user-and-reporting-period identity so a replay reuses the existing result.</td></tr>
+          <tr><td>Apply a database change once</td><td>Atomically record a unique operation ID with the change in the same transaction.</td></tr>
+          <tr><td>Call an external provider</td><td>Reuse a stable provider idempotency key where supported; verify its scope and retention window.</td></tr>
+          <tr><td>Delete an asset</td><td>Treat an already-absent intended asset as completed, while still checking ownership and the target version.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        A separate “has this job run?” read followed by an unprotected write can race between workers.
+        Use an atomic constraint or conditional transition. Recording “done” before an external call
+        risks losing the effect; recording it afterward leaves a duplicate window. If the provider
+        cannot deduplicate, define how you detect, reconcile or tolerate that ambiguity.
+      </p>
+      <p>
+        Queue-level deduplication can reduce duplicate submissions but is not a universal exactly-once
+        guarantee for side effects. Keep the business identity stable across retries and deliberate
+        replays. See <a href="https://docs.bullmq.io/patterns/idempotent-jobs">BullMQ's idempotent-job guidance</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Idempotency preserves the intended result when the same operation runs again.</li>
+        <li>A transaction cannot roll back effects in unrelated external systems.</li>
+        <li>Use stable business keys and atomic protections; handle ambiguous provider outcomes explicitly.</li>
+      </ul></div>
+
+      <h2>One-off, delayed and recurring tasks</h2>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Task type</th><th>Trigger</th><th>Example</th></tr></thead>
+        <tbody>
+          <tr><td>One-off</td><td>A particular event or request.</td><td>Send a welcome email after one registration.</td></tr>
+          <tr><td>Delayed</td><td>A specific eligibility time.</td><td>Begin deletion after an explicitly offered grace period.</td></tr>
+          <tr><td>Recurring</td><td>A schedule that produces repeated runs.</td><td>Generate a daily report or clean up expired records.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        A one-off task can still have multiple execution attempts. A delayed task becomes eligible
+        after its delay; worker availability determines when it actually starts. A scheduler creates
+        recurring jobs, while workers execute them. Those are separate responsibilities.
+      </p>
+      <h3>Push notifications as one-off jobs</h3>
+      <p>
+        A mobile app registers for remote notifications and sends its registration or device token
+        to the backend. A worker uses that token and the notification content to call a push service,
+        such as FCM or APNs. Platform infrastructure delivers the message to the device; the provider
+        accepting it is not proof that a user saw it. Keep token records current and handle invalid
+        tokens rather than retrying them forever.
+        <a href="https://firebase.google.com/docs/cloud-messaging/fcm-architecture">FCM's delivery architecture</a>.
+      </p>
+      <h3>Scheduling is more than a cron expression</h3>
+      <ul>
+        <li><strong>Time zone:</strong> define what “midnight” means and how daylight-saving changes are handled.</li>
+        <li><strong>Missed runs:</strong> decide whether an outage causes catch-up runs, one combined run or skipped work.</li>
+        <li><strong>Overlaps:</strong> decide what happens if yesterday's run is still executing when the next becomes due.</li>
+        <li><strong>Duplicates:</strong> coordinate schedulers and give each logical run a stable identity, such as user plus reporting period.</li>
+      </ul>
+      <p>
+        Celery's periodic-task documentation, for example, calls out scheduler duplication and
+        overlapping runs. Scheduling is not a guarantee of exactly one execution at an exact instant.
+        <a href="https://docs.celeryq.dev/en/stable/userguide/periodic-tasks.html">Celery periodic tasks</a>.
+      </p>
+      <p>
+        A cleanup job may reclaim expired sessions in batches. Authentication must still reject an
+        expired or revoked session immediately according to its policy; the next cleanup run is not
+        the mechanism that decides whether the session remains valid.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>One logical task can be retried; a schedule creates multiple logical runs.</li>
+        <li>Specify time zones, missed-run behavior, overlap rules and run identity.</li>
+        <li>Cleanup reclaims storage; it must not be the only enforcement of expiry or revocation.</li>
+      </ul></div>
+
+      <h2>Chains and parallel task dependencies</h2>
+      <p>
+        Some jobs need the output of earlier jobs. Others can run at the same time. Model those
+        dependencies explicitly so that a failed step can be retried without repeating every
+        successful step in the workflow.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>One possible learning-platform video workflow</div>
+        <pre><code>Upload durably completed and validated
+                 │
+                 ▼
+           Encode video
+                 │
+           ┌─────┴───────────┐
+           ▼                 ▼
+    Generate thumbnails   Generate subtitles
+           │                 │
+           ▼                 │
+    Resize thumbnails        │
+           └───────┬─────────┘
+                   ▼
+       Publish when required outputs are ready</code></pre>
+      </div>
+      <p>
+        This is an illustrative dependency graph. Subtitles or thumbnails may be derived directly
+        from the original upload in another design, so they need not universally wait for encoding.
+        Follow actual input dependencies, not an arbitrary sequence of names.
+      </p>
+      <p>
+        Do not enqueue processing against an upload that has merely started. With direct object-store
+        uploads or presigned URLs, confirm the expected object is durably available and validate its
+        ownership and input properties first. A quick response that starts an upload is not proof the
+        video has finished uploading.
+      </p>
+      <p>
+        Persist workflow progress and output references. Decide whether a failed optional subtitle
+        job blocks publication or results in a partial outcome. Even “parent” and “child” terminology
+        varies: in <a href="https://docs.bullmq.io/guide/flows/">BullMQ flows</a>, a parent normally waits
+        for its children, so parent does not universally mean the step that runs first.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Run independent jobs in parallel and gate dependent jobs on required outputs.</li>
+        <li>Begin processing only after the referenced input is durably available and validated.</li>
+        <li>Persist progress and define how failures affect downstream steps.</li>
+      </ul></div>
+
+      <h2>Batch work and account deletion</h2>
+      <p>
+        A <strong>batch</strong> processes many items with the same kind of operation. A dispatcher
+        might create one report job per user, or chunk a large cleanup into bounded groups of records.
+        Creating many independent jobs is often called <strong>fan-out</strong>; collecting their
+        results is fan-in. A batch can be part of a larger chain.
+      </p>
+      <h3>Account deletion is a workflow</h3>
+      <ol>
+        <li>Authenticate and authorize the request, then durably record the deletion intent.</li>
+        <li>Apply the documented access policy, such as disabling access and revoking sessions, and return a pending status.</li>
+        <li>After any explicit grace period, process owned records and assets in bounded, restartable steps.</li>
+        <li>Record each completed step and reconcile failures before declaring the workflow complete.</li>
+      </ol>
+      <p>
+        Shared projects may require ownership transfer rather than deletion. A grace period needs a
+        real cancellation or recovery flow; an already-disabled login must not be the only way to
+        cancel. Workers must check whether the request was canceled or superseded before continuing
+        destructive steps. Do not promise that all data is permanently gone at the moment work is queued.
+      </p>
+      <p>
+        An account-deletion workflow is not automatically a batch; its per-record cleanup steps can
+        be batched. A giant transaction spanning database rows, object storage and external APIs is
+        neither practical nor globally atomic. Prefer short transactions and durable checkpoints,
+        with each repeated step safe to resume. A checkpoint is useful only if repeating work around
+        that checkpoint cannot corrupt the result.
+      </p>
+      <p>
+        Weekly reports for thousands of users need bounded fan-out and concurrency. A scheduler can
+        create work incrementally rather than materializing an unlimited number of huge job payloads
+        at once. Track per-item results so a few failures do not force every successful report to rerun.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Batch large workloads into bounded, individually trackable pieces.</li>
+        <li>Account deletion needs durable intent, access rules and accurate progress reporting.</li>
+        <li>Use resumable steps across systems; a local rollback cannot undo every external change.</li>
+      </ul></div>
+
+      <h2>The API contract for unfinished work</h2>
+      <p>
+        Return a response that describes what is true now. <code>202 Accepted</code> is appropriate
+        when a requested operation has been accepted but remains unfinished. Include a way to inspect
+        progress; the original HTTP response will not later transform into a completion response.
+        <a href="https://www.rfc-editor.org/rfc/rfc9110.html#name-202-accepted">HTTP 202 semantics</a>.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Example: POST /v1/reports</div>
+        <pre><code data-example="http-json">HTTP/1.1 202 Accepted
+Content-Type: application/json
+Location: /v1/jobs/job-842
+Cache-Control: no-store
+
+{
+  "jobId": "job-842",
+  "status": "pending",
+  "statusUrl": "/v1/jobs/job-842"
+}</code></pre>
+      </div>
+      <div class="msg">
+        <div class="msg-head"><span class="dot dot--res"></span>Later: GET /v1/jobs/job-842</div>
+        <pre><code data-example="http-json">HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: no-store
+
+{
+  "jobId": "job-842",
+  "status": "succeeded",
+  "resultUrl": "/v1/reports/report-29"
+}</code></pre>
+      </div>
+      <p>
+        A status resource can expose pending, running, succeeded, failed or canceled states according
+        to your contract. A successful status lookup may return <code>200</code> with
+        <code>"status": "failed"</code>; the lookup succeeded even though the background operation did
+        not. Poll with a sensible interval or use a separate notification mechanism.
+      </p>
+      <p>
+        A signup can still return <code>201 Created</code> if the account was actually created,
+        while reporting email delivery as pending. If neither a durable job nor durable intent was
+        recorded, do not claim the work was accepted. Map that failure to an appropriate error and
+        make retried submissions safe.
+      </p>
+      <p>
+        Protect job status and result URLs with authorization. An opaque job ID is not permission to
+        read another user's report. Specify result retention and expose safe error descriptions rather
+        than stack traces or provider secrets. These are ordinary
+        <a href="07-api-design.html">API design</a> responsibilities even when execution is asynchronous.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Report acceptance separately from completion, commonly using 202 plus a status resource.</li>
+        <li>201 can describe an already-created account while its follow-up work remains pending.</li>
+        <li>Authorize status and result access and define failure and retention behavior.</li>
+      </ul></div>
+
+      <h2>Scaling, ordering and provider limits</h2>
+      <p>
+        Queues absorb bursts, but do not remove work. If jobs arrive faster than workers complete
+        them for a sustained period, the backlog grows. Adding workers helps only while the database,
+        broker, CPU, memory and downstream services can support the additional concurrency.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Control</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td>Worker concurrency</td><td>Limit how many tasks run simultaneously.</td></tr>
+          <tr><td>Separate worker pools</td><td>Keep long reports or video processing from starving small urgent jobs.</td></tr>
+          <tr><td>Rate limiting</td><td>Respect the provider's total request budget across workers.</td></tr>
+          <tr><td>Backpressure</td><td>Slow, defer or reject new work when capacity cannot meet the contract.</td></tr>
+          <tr><td>Ordering scope</td><td>Serialize operations for a specific entity only when the domain requires it.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        A concurrency limit is not a rate limit. Ten fast workers can issue thousands of requests per
+        minute. A per-worker limit also multiplies as workers are added, so account-wide provider
+        quotas often need coordinated enforcement. Provider throttling should feed into retry and
+        capacity decisions, as discussed in <a href="09-caching.html">Caching and rate limiting</a>.
+      </p>
+      <p>
+        FIFO delivery does not by itself guarantee completion order when multiple workers, failures
+        and retries are involved. If two changes to one account must stay ordered, use the queue's
+        supported grouping mechanism and/or version-checked state transitions. Avoid imposing one
+        global sequence on unrelated users when per-entity ordering is sufficient.
+      </p>
+      <p>
+        Priority queues need a fairness policy so lower-priority work is not starved forever. Track
+        queue age alongside depth: a short queue containing one overdue deletion can be more urgent
+        than a long queue of cheap, newly arrived jobs.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Scale workers within downstream capacity and apply backpressure when necessary.</li>
+        <li>Coordinate provider rate limits across replicas; concurrency is a different control.</li>
+        <li>Ordering must cover retries and completion, not just enqueue order.</li>
+      </ul></div>
+
+      <h2>Focused handlers and worker lifecycle</h2>
+      <p>
+        Keep a task centered on one useful operation. Sending one report is easier to retry and
+        diagnose than a handler that generates all reports, updates billing and deletes old files.
+        Split work at meaningful checkpoints, rather than turning every helper call into a new job.
+      </p>
+      <p>
+        Some tasks, such as encoding a large video, genuinely run for a long time. They need suitable
+        resource limits, execution deadlines, progress reporting and claim renewal. Split or checkpoint
+        them when the processing format allows it; duration alone does not make a task incorrectly designed.
+      </p>
+      <ul>
+        <li><strong>Before execution:</strong> validate input, confirm required state and detect expired or canceled work.</li>
+        <li><strong>During execution:</strong> bound external calls, renew claims when needed and record useful progress.</li>
+        <li><strong>On success:</strong> durably record required effects or outputs before acknowledging completion.</li>
+        <li><strong>On failure:</strong> preserve diagnostic context and let the retry policy receive the actual error.</li>
+        <li><strong>On shutdown:</strong> stop claiming new jobs, drain within a bounded period, then safely release or allow claims to expire.</li>
+      </ul>
+      <p>
+        Cancellation is cooperative. Marking a job canceled does not recall an email already sent or
+        stop a worker that never checks cancellation. Define which steps are reversible, which are
+        final and how a worker that loses its claim avoids applying obsolete results.
+      </p>
+      <p>
+        Workers should use their own scoped service credentials and protect access to payloads and
+        outputs. Do not assume a job remains authorized merely because it sat in a trusted queue;
+        recheck relevant revocation, ownership or cancellation state before sensitive operations.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use focused tasks with meaningful retry and checkpoint boundaries.</li>
+        <li>Long work needs explicit timeout, renewal, cancellation and progress behavior.</li>
+        <li>Graceful shutdown and state checks are part of reliable execution.</li>
+      </ul></div>
+
+      <h2>Monitoring and a reliability checklist</h2>
+      <p>
+        A quick API response says little about whether background work is healthy. Measure the whole
+        interval from acceptance to the intended result, as well as the individual worker attempts.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Signal</th><th>What it helps reveal</th></tr></thead>
+        <tbody>
+          <tr><td>Queue depth and age of oldest eligible job</td><td>A growing backlog or work missing its service deadline.</td></tr>
+          <tr><td>Enqueue, start and completion rates</td><td>Whether processing capacity keeps up with arrivals.</td></tr>
+          <tr><td>Queue wait, execution time and total latency</td><td>Where the delay occurs and whether users get results on time.</td></tr>
+          <tr><td>Retries, terminal failures and dead-letter count</td><td>Transient outages, poison messages or broken handlers.</td></tr>
+          <tr><td>Worker health, claim expirations and resource use</td><td>Crashes, stalled processing, lost ownership or exhaustion.</td></tr>
+          <tr><td>Outbox age and provider responses</td><td>Failures before queue delivery or after the worker contacts a dependency.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Log the job ID, task type, attempt, correlation ID and a safe error classification. Keep raw
+        passwords, verification tokens and sensitive payloads out of logs. Put high-cardinality job
+        IDs in logs or traces rather than metric labels. Prometheus can collect metrics, while Grafana
+        can display dashboards; alerts still need thresholds, an owner and a recovery procedure.
+      </p>
+      <h3>Failure cases worth checking</h3>
+      <ol>
+        <li>Submit the same logical job twice and confirm that business effects do not multiply.</li>
+        <li>Stop a worker after its effect succeeds but before acknowledgement; confirm safe redelivery.</li>
+        <li>Fail publication after a database commit; confirm the durable intent is eventually relayed.</li>
+        <li>Throttle or time out the provider; confirm bounded retries and visible terminal failures.</li>
+        <li>Let a job expire, cancel it or change ownership before execution; confirm the worker follows the current policy.</li>
+        <li>Restart the scheduler and workers during a backlog; confirm missed-run, overlap and shutdown behavior.</li>
+      </ol>
+      <p>
+        Background processing improves responsiveness by moving when and where work is performed.
+        Reliability comes from the surrounding design: durable acceptance, replay-safe effects,
+        bounded retries, clear status and observable recovery. A queue supplies mechanisms; the
+        application must decide the guarantees it promises.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Monitor acceptance-to-completion latency, queue age, failure rates and worker health.</li>
+        <li>Use correlated, privacy-conscious logs and actionable alerts.</li>
+        <li>Check duplicate delivery, partial success, outages and restarts before relying on the workflow.</li>
+      </ul></div>
+    </div>
+
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; a study guide for curious engineers.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+
+</div>
+
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</dialog>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caching &middot; Backend Principles</title>
+<meta name="description" content="Backend caching notes covering cache hits and misses, CDN, DNS, memory, Redis, cache-aside, write-through, TTL, eviction, safe keys, sessions, rate limiting and cache failures.">
+<script>
+  (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try {
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell">
+
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 09</p>
+      <h1>Caching</h1>
+      <p class="lead">
+        Reuse work you have already done. Caching makes repeated reads and expensive computations
+        cheaper by keeping useful results close to the consumer. The design challenge is deciding
+        <strong>what to keep, how long to trust it and what happens when it disappears</strong>.
+      </p>
+    </header>
+
+    <div class="prose">
+      <h2>What caching actually saves</h2>
+      <p>
+        <strong>Caching stores reusable data or computed results somewhere cheaper or faster to
+        access, so later requests can avoid repeating the original work.</strong> That saving might
+        be a database query, a calculation, an external API call or a long network journey.
+      </p>
+      <p>
+        Usually the cache holds a frequently used subset of a larger dataset: the <strong>working
+        set</strong>. A small dataset might fit entirely. What makes it a cache is the role it plays,
+        not a requirement that it contain only part of the data or live in RAM. A copy on a nearby
+        disk can be quicker to serve than the same file across an ocean.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td>Cache hit</td><td>A usable entry exists for the requested key.</td></tr>
+          <tr><td>Cache miss</td><td>No usable entry exists; load or compute the result from its source.</td></tr>
+          <tr><td>Cache fill</td><td>Store that result so a later request can reuse it.</td></tr>
+          <tr><td>Stale data</td><td>A cached result no longer reflects the current source or required freshness.</td></tr>
+          <tr><td>Source of truth</td><td>The authoritative system used to establish the correct value.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        A hit saves work; a miss can add work because the application checks the cache before
+        contacting the source. Storage, network calls, serialization and keeping copies consistent
+        all have costs. Caching is useful when the reuse outweighs those costs.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>A cache reuses data or computation to reduce latency, load or cost.</li>
+        <li>A hit finds a usable result; a miss needs the original work.</li>
+        <li>A cache can use RAM or disk, and its contents may be stale or absent.</li>
+      </ul></div>
+
+      <h2>Recognizing a useful caching workload</h2>
+      <p>
+        Look for repeated reads, expensive results and a clear tolerance for older data.
+        Popularity alone is not enough: two requests must be allowed to share the same answer.
+        These patterns illustrate the idea without assuming a particular company's private architecture.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Workload</th><th>Reusable work</th><th>What affects correctness?</th></tr></thead>
+        <tbody>
+          <tr><td>Search results</td><td>Results or intermediate computations for repeated searches.</td><td>Query, language, location, personalization and index changes.</td></tr>
+          <tr><td>Trending topics</td><td>A periodically computed regional ranking.</td><td>Region, audience and how much delay the product permits.</td></tr>
+          <tr><td>Video delivery</td><td>Encoded video segments stored near viewers.</td><td>Content version, rendition and access policy.</td></tr>
+          <tr><td>Product or profile pages</td><td>Repeatedly requested descriptions, images or public fields.</td><td>Edits, privacy changes, prices and stock availability.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Search engines do not crawl and rebuild the entire web index for each query. Crawling,
+        indexing and serving results are distinct stages; caching can avoid repeated work within
+        a system that already maintains an index.
+        <a href="https://developers.google.com/search/docs/fundamentals/how-search-works">Google's overview of search</a>.
+      </p>
+      <p>
+        Netflix provides a concrete delivery example: <a href="https://openconnect.netflix.com/en/">Open Connect</a>
+        works with ISPs and embedded appliances to localize video traffic. This reduces the amount
+        of content that needs to cross distant networks for every viewer.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Repeated, costly reads with an acceptable freshness window are good candidates.</li>
+        <li>Cache matching results, including their location, audience and other relevant inputs.</li>
+        <li>Nearby copies reduce network work; stored computations reduce repeated processing.</li>
+      </ul></div>
+
+      <h2>Hardware caches and the memory hierarchy</h2>
+      <p>
+        Caching appears at several levels of a computer. CPU caches keep recently used instructions
+        and data close to execution units. RAM holds active application data. Persistent storage
+        holds data beyond a process or machine restart. These layers cooperate.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Layer</th><th>Typical role</th><th>Important distinction</th></tr></thead>
+        <tbody>
+          <tr><td>L1, L2 and L3 CPU caches</td><td>Reduce time spent fetching instructions and data from memory.</td><td>Small and fast; sizes and sharing between cores depend on the processor.</td></tr>
+          <tr><td>RAM / main memory</td><td>Hold the active data of applications, databases and caches.</td><td>Fast, usually volatile and more expensive per unit of capacity than disk.</td></tr>
+          <tr><td>SSD / HDD</td><td>Retain larger datasets without continuous power.</td><td>SSDs are electronic; HDDs have moving parts. Both differ from RAM.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Why sequential access can help</h3>
+      <p>
+        CPUs move data in chunks called <strong>cache lines</strong>. Traversing contiguous array
+        elements often reuses a line that is already loaded, and hardware prefetching can anticipate
+        upcoming accesses. This is spatial locality. Reusing the same data soon is temporal locality.
+        It does not mean the CPU always copies an entire array into its cache.
+      </p>
+      <p>
+        Random-access memory permits direct addressing without mechanically seeking to a disk
+        position. Actual latency still depends on the hardware and access pattern. At the application
+        level, a remote cache also has network and serialization costs. As covered in
+        <a href="08-databases.html">Databases &amp; PostgreSQL</a>, a database can serve reads from its
+        own memory buffers, so a database call does not necessarily cause physical disk I/O.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>CPU caches exploit locality; application caches reuse larger results.</li>
+        <li>RAM is usually volatile; SSDs and HDDs provide non-volatile storage.</li>
+        <li>Measure the whole request, including network costs and existing database caching.</li>
+      </ul></div>
+
+      <h2>CDNs: caching near the user</h2>
+      <p>
+        A <strong>content delivery network</strong> serves content through geographically distributed
+        locations. The <strong>origin</strong> supplies the original content; an <strong>edge server</strong>
+        can keep a reusable copy. A <strong>point of presence</strong> (PoP) is a location containing
+        network infrastructure and servers.
+      </p>
+      <ol>
+        <li>The client requests a resource such as an image, stylesheet or video segment.</li>
+        <li>The CDN directs the request to a suitable edge using DNS and/or network routing.</li>
+        <li>On a usable cache hit, the edge responds with its stored copy.</li>
+        <li>On a miss, it obtains content from an upstream cache or the origin, then caches it if policy permits.</li>
+      </ol>
+      <p>
+        “Nearest” usually means a suitable network path, taking routing, availability and capacity
+        into account. It is not a promise that the geographically closest server handles every request.
+        The benefit is less origin traffic and a shorter delivery path.
+        <a href="https://www.cloudflare.com/learning/cdn/what-is-a-cdn/">Cloudflare's CDN overview</a>.
+      </p>
+      <h3>Delivery and video quality are different decisions</h3>
+      <p>
+        Encoding produces different video renditions. An adaptive streaming player can choose among
+        them based on bandwidth, buffer state and device capabilities. CDN routing delivers the
+        selected segments. DNS does not normally switch a viewer to a “720p-only server” because
+        their connection is slow. Edge caches can also use disk storage for large media objects.
+      </p>
+      <h3>HTTP freshness and privacy</h3>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Response directive</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>max-age=60</code></td><td>Set a freshness lifetime of 60 seconds.</td></tr>
+          <tr><td><code>s-maxage=300</code></td><td>Set a shared-cache freshness lifetime, overriding max-age there.</td></tr>
+          <tr><td><code>private</code></td><td>Allow eligible private caching but prohibit shared caching.</td></tr>
+          <tr><td><code>no-cache</code></td><td>Require successful validation before reuse; storage can still be allowed.</td></tr>
+          <tr><td><code>no-store</code></td><td>Direct compliant caches not to store the request or response.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        An expired HTTP response can remain stored and be revalidated, for example using an ETag.
+        Authentication and privacy-sensitive responses need deliberate caching rules; a URL alone
+        may not distinguish different users' responses. Header semantics come from
+        <a href="https://www.rfc-editor.org/rfc/rfc9111.html">RFC 9111</a>; CDN configuration must respect them.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>A CDN brings reusable content closer to consumers and reduces origin traffic.</li>
+        <li>Routing selects a delivery path; adaptive streaming selects video quality.</li>
+        <li>HTTP freshness, revalidation and privacy directives determine safe response reuse.</li>
+      </ul></div>
+
+      <h2>DNS caching: avoiding repeated lookups</h2>
+      <p>
+        DNS returns records, including IPv4 <code>A</code> and IPv6 <code>AAAA</code> addresses.
+        Names can have multiple addresses or aliases. Browser, OS and resolver caches avoid repeated lookups.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Simplified cold lookup for example.com</div>
+        <pre><code>Client asks its recursive resolver
+  Resolver asks a root server       → referral to .com servers
+  Resolver asks a .com server       → referral to example.com's nameservers
+  Resolver asks an authoritative server → answer for the requested record
+Resolver caches the answer and returns it to the client</code></pre>
+      </div>
+      <p>
+        Cached referrals skip intermediate steps. The resolver follows referrals iteratively on
+        the client's behalf. An authoritative server answers from its zone, rather than recursively
+        looking up the record elsewhere.
+      </p>
+      <p>
+        Browser and OS behavior varies, including when encrypted DNS is used, so there is no universal
+        “OS first, browser second” sequence. DNS TTLs govern reuse. Changing an authoritative record
+        does not instantly replace copies already cached elsewhere.
+        <a href="https://www.cloudflare.com/learning/dns/what-is-dns/">DNS resolution and caching</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Browser, OS and resolver caches can avoid DNS network work.</li>
+        <li>On a cold lookup, the resolver follows referrals to an authoritative answer.</li>
+        <li>Cached records and referrals have TTLs; changes are not immediately visible everywhere.</li>
+      </ul></div>
+
+      <h2>Application caches: local and shared</h2>
+      <p>
+        An application can keep entries inside its own process or use a separate cache service.
+        Both are software-managed caches. Neither requires you to directly manage CPU cache lines.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Placement</th><th>Useful property</th><th>Tradeoff</th></tr></thead>
+        <tbody>
+          <tr><td>In-process cache</td><td>A lookup avoids a network round trip.</td><td>Each process has its own copy; restarts lose it and replicas can disagree.</td></tr>
+          <tr><td>Shared cache service</td><td>Application replicas reuse a common store.</td><td>Adds network latency, operational cost and another failure dependency.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Redis and <a href="https://valkey.io/topics/">Valkey</a> provide key-based access to data
+        structures such as strings, hashes, lists and sets. A string value can contain serialized JSON.
+        <a href="https://docs.memcached.org/">Memcached</a> provides a simpler cache of keys and opaque
+        values. These are not relational tables with SQL joins.
+        <a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/WhatIs.html">Amazon ElastiCache</a>
+        is a managed service for supported cache engines, not a separate caching strategy.
+      </p>
+      <h3>In-memory does not settle persistence</h3>
+      <p>
+        Redis can persist data using RDB snapshots, an append-only file (AOF), both, or neither.
+        Recovery and possible data loss depend on configuration. Memcached is normally treated as
+        disposable cache storage; do not assume every in-memory engine restores all entries after
+        a restart. See <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/">Redis persistence options</a>.
+      </p>
+      <p>
+        A shared Redis deployment does not have to span the globe. Put a cache near its callers unless
+        the architecture has a reason otherwise. Multiple application instances can share a single
+        cache service; distribution across cache nodes is a separate deployment decision.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Local caches avoid network calls but create independent copies per process.</li>
+        <li>Shared caches centralize reuse and introduce a network dependency.</li>
+        <li>Data structures, persistence and deployment guarantees depend on the selected engine and configuration.</li>
+      </ul></div>
+
+      <h2>Cache-aside: load only when needed</h2>
+      <p>
+        <strong>Cache-aside</strong>, also called lazy loading or lazy caching, makes the application
+        responsible for consulting and filling the cache. It is a useful starting point for
+        caching database results.
+      </p>
+      <ol>
+        <li>Validate the request and establish the caller's authorization and scope.</li>
+        <li>Build a key that identifies the requested result and check the cache.</li>
+        <li>On a hit, decode and return the permitted cached data.</li>
+        <li>On a miss, read the authoritative source or compute the result.</li>
+        <li>Store a successful result with an appropriate TTL, then return it.</li>
+      </ol>
+      <p>
+        Only requested data is loaded, but the first request pays the miss cost. Expiration, eviction
+        and restarts create later misses too. Cache-aside can be combined with updates on writes.
+        <a href="https://docs.aws.amazon.com/whitepapers/latest/database-caching-strategies-using-redis/caching-patterns.html">AWS caching patterns</a>.
+      </p>
+      <h3>A small Redis example</h3>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Redis commands — illustrative project data</div>
+        <pre><code>SET cache:v1:org:org-1:project:project-2 '{"id":"project-2","name":"Website"}' EX 60
+GET cache:v1:org:org-1:project:project-2
+TTL cache:v1:org:org-1:project:project-2
+DEL cache:v1:org:org-1:project:project-2</code></pre>
+      </div>
+      <p>
+        <code>SET ... EX 60</code> writes the value and its 60-second expiration in one command.
+        <code>GET</code> returns the stored string or a missing-value response; <code>TTL</code>
+        inspects the remaining lifetime; <code>DEL</code> invalidates the entry. JSON encoding and
+        decoding happen in the application when using this string representation. A normal
+        <code>GET</code> does not refresh the TTL.
+        <a href="https://redis.io/docs/latest/commands/set/">Redis SET options</a>.
+      </p>
+      <p>
+        Use the client library for your language, with connection reuse and bounded timeouts.
+        For a disposable result cache, a failed cache fill should not erase a successful database
+        read. A cache timeout is an operational error to record, even if the fallback path treats
+        it like a miss. Do not replace a valid value with a cached transient server error.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Cache-aside checks the cache, loads on a miss and saves a reusable result.</li>
+        <li>Set the value and TTL together; reads do not automatically extend expiration.</li>
+        <li>Preserve authorization and use bounded, observable cache failure handling.</li>
+      </ul></div>
+
+      <h2>Writes, invalidation and consistency</h2>
+      <p>
+        A cache fill answers “how does data get here?” A write strategy answers “what happens when
+        the source changes?” These are related decisions, not mutually exclusive product choices.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Strategy</th><th>Write path</th><th>Tradeoff</th></tr></thead>
+        <tbody>
+          <tr><td>Invalidate after commit</td><td>Commit the database change, then remove affected cache entries.</td><td>The next reader reloads; invalidation must reach every relevant cached view.</td></tr>
+          <tr><td>Write-through / update on write</td><td>Update the cache as part of the write workflow, alongside persistence.</td><td>Adds write work and can populate values nobody reads.</td></tr>
+          <tr><td>TTL-only refresh</td><td>Leave the entry until it expires.</td><td>Simple, but readers may see an older value during the allowed window.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Write-through designs vary in who coordinates persistence and caching. An application that
+        commits PostgreSQL and then writes Redis has performed two operations across two systems.
+        Calling this write-through does not make the pair atomic: the second write can fail, or
+        concurrent writers can update the cache out of order.
+      </p>
+      <h3>Why deleting a key is not a complete consistency guarantee</h3>
+      <p>
+        Suppose a reader misses the cache and reads version 1. Before it fills the cache, a writer
+        commits version 2 and deletes the key. The original reader then stores version 1. The cache
+        is stale again even though invalidation happened after the commit.
+      </p>
+      <p>
+        A TTL limits how long that entry remains reusable. Stronger requirements can need version
+        checks that reject older fills, coordinated refreshes or an authoritative read. Changes made
+        by scripts and background jobs must also participate in the update policy. Document the
+        consistency guarantee instead of promising that every cache read is always fresh.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Choose how writes update or invalidate cached copies.</li>
+        <li>A database write plus a cache write is not automatically one atomic operation.</li>
+        <li>Concurrent fills can reintroduce stale values; use a policy suited to the required consistency.</li>
+      </ul></div>
+
+      <h2>Cache keys and freshness budgets</h2>
+      <p>
+        A key is a claim that requests using it may share one result. If the key omits an input that
+        changes the answer, the cache can return the wrong data even when it is fast and has a high
+        hit rate. Begin with the response contract from <a href="07-api-design.html">API Design</a>.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Result depends on…</th><th>Key or policy must account for…</th></tr></thead>
+        <tbody>
+          <tr><td>Organization or tenant</td><td>The verified tenant scope, not just the resource ID.</td></tr>
+          <tr><td>User permissions</td><td>The authorized audience or per-user scope, plus fresh permission checks where required.</td></tr>
+          <tr><td>List options</td><td>Filters, sort order, pagination and page size in a stable representation.</td></tr>
+          <tr><td>Presentation</td><td>Locale, currency, units or other variants that change the response.</td></tr>
+          <tr><td>Payload format</td><td>A cache schema version so deployments do not decode an incompatible old value.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Use validated, normalized inputs so equivalent requests generate the same key. Avoid placing
+        passwords, bearer tokens or unnecessary personal data in keys that may appear in logs.
+        Including a user ID does not replace authorization, and cached permissions can themselves
+        become stale after revocation.
+      </p>
+      <h3>Choose TTL from the permitted delay</h3>
+      <p>
+        A <strong>time to live</strong> sets how long an entry remains eligible for reuse. A project
+        activity summary might tolerate a short delay; a payment authorization cannot use the same
+        assumption. Weather forecasts, current observations and emergency alerts also have different
+        freshness needs. “Cache all weather data for an hour” is not a universal rule.
+      </p>
+      <p>
+        A TTL measures time since a cache write, not necessarily time since the source was accurate.
+        If the source is a lagging replica or another cache, the value can already be old when stored.
+        Rewriting an old value with a new TTL can extend its apparent lifetime. Carry a source version
+        or observation time when the age matters, and set a maximum acceptable age explicitly.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Key every input and security scope that changes the result.</li>
+        <li>TTL comes from the product's freshness budget, not an arbitrary default.</li>
+        <li>Entry lifetime and source-data age are different; re-caching old data does not make it fresh.</li>
+      </ul></div>
+
+      <h2>Expiration, invalidation and eviction</h2>
+      <p>
+        <strong>Expiration</strong> makes an entry unusable after its lifetime.
+        <strong>Invalidation</strong> deliberately removes or marks a result stale after a change.
+        <strong>Eviction</strong> makes space when the cache reaches its memory budget.
+        An entry can be evicted before its TTL ends.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Redis policy</th><th>What happens under memory pressure?</th></tr></thead>
+        <tbody>
+          <tr><td><code>noeviction</code></td><td>Reject writes needing additional memory; existing reads can continue.</td></tr>
+          <tr><td><code>allkeys-lru</code></td><td>Prefer removing least recently used entries.</td></tr>
+          <tr><td><code>allkeys-lfu</code></td><td>Prefer removing least frequently used entries.</td></tr>
+          <tr><td><code>allkeys-random</code></td><td>Choose entries randomly.</td></tr>
+          <tr><td><code>volatile-ttl</code></td><td>Among entries with expiration, prefer the shortest remaining TTL.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        LRU tracks recency; LFU tracks frequency. Redis uses approximations, and its LFU history decays.
+        The <code>volatile-*</code> policies only consider keys with expiration. Ordinary TTL expiration
+        still works independently of memory-pressure eviction. <code>noeviction</code> is a legitimate
+        choice when silently losing entries is unacceptable, but write failures need handling.
+        <a href="https://redis.io/docs/latest/develop/reference/eviction/">Redis eviction policies</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Expiration limits time; invalidation responds to change; eviction frees capacity.</li>
+        <li>LRU favors recent use; LFU favors frequent use.</li>
+        <li>TTL does not guarantee an entry will survive until expiration.</li>
+      </ul></div>
+
+      <h2>Caching database queries and external APIs</h2>
+      <h3>Expensive database results</h3>
+      <p>
+        Imagine the project dashboard aggregates task counts across several tables. Many visits
+        repeat the same calculation. After checking the SQL and indexes, cache the authorized result
+        if the dashboard permits a small delay. This can avoid repeating joins and aggregations
+        described in <a href="08-databases.html">the database lesson</a>.
+      </p>
+      <p>
+        Cache the result your application needs, not a promise that the underlying query will never
+        run again. Each relevant task change may affect a project summary, a filtered list and a
+        user's assigned-task count. Invalidating only the individual task entry leaves those derived
+        views unchanged. Keep the number of cached views manageable and document their dependencies.
+      </p>
+      <h3>External API responses</h3>
+      <p>
+        Reusing a provider's response can reduce latency, paid calls and rate-limit consumption.
+        For a weather card, include location and units in the key, respect provider terms and update
+        frequency, and show the observation time when useful. A provider timeout should not silently
+        become a successful empty forecast with a long TTL.
+      </p>
+      <div class="callout callout--key">
+        <p class="callout-label">Read models and final decisions</p>
+        <p>
+          A cached product description can serve many page views. A displayed stock estimate can be
+          approximate if the product permits it. The final order still needs an authoritative stock
+          check or reservation and a current price decision. A fast cached read does not enforce a
+          transaction's invariants.
+        </p>
+      </div>
+      <p>
+        Short-lived <strong>negative caching</strong> can reuse a legitimate “not found” result to
+        avoid repeated lookups. Distinguish that result from an outage, keep its scope correct, and
+        invalidate it when the resource is created. Otherwise a newly created item may appear absent.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Cache repeated query results and provider responses when delay is acceptable.</li>
+        <li>A write can affect multiple cached views, not only one resource key.</li>
+        <li>Critical transactions still enforce authoritative prices, inventory and other invariants.</li>
+      </ul></div>
+
+      <h2>Sessions: fast storage can hold important state</h2>
+      <p>
+        In a server-side session flow, the client carries an opaque session identifier and the server
+        looks up the associated authenticated session. A shared in-memory store can make that lookup
+        efficient across application replicas. See <a href="04-auth.html">Authentication &amp; Authorization</a>
+        for the distinction between a session identifier, cookies and authorization.
+      </p>
+      <p>
+        If Redis contains the only session record, it is the session's <strong>state store</strong>.
+        It is not merely a copy that can be reconstructed from a profile row. Losing a valid session
+        may log the user out; inventing a replacement session from the user ID would bypass authentication.
+      </p>
+      <ul>
+        <li>Enforce the application's idle and absolute expiry rules; refreshing an idle TTL must not erase the absolute deadline.</li>
+        <li>Invalidate the session on logout or revocation according to the authentication contract.</li>
+        <li>A missing, expired or unreadable session must not grant access. An outage can require a temporary service error.</li>
+        <li>Choose persistence, availability and eviction behavior for session state deliberately, separately from disposable result caching.</li>
+      </ul>
+      <p>
+        The storage technology does not decide the meaning of the data. One Redis deployment might
+        hold a rebuildable dashboard result; another might hold authentication state whose loss
+        changes user access. Their acceptable failure behavior is different.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Shared session storage lets application replicas validate the same session.</li>
+        <li>Session records may be authoritative state, not disposable cached copies.</li>
+        <li>Expiry, revocation and storage failures must preserve authentication rules.</li>
+      </ul></div>
+
+      <h2>Rate limiting with shared counters</h2>
+      <p>
+        A rate limiter can run in <a href="06-request-lifecycle.html">middleware</a> before an
+        expensive handler. For example, allow an account 50 requests per calendar minute across
+        all application replicas. A shared store coordinates the counter so adding servers does
+        not multiply the allowance.
+      </p>
+      <ol>
+        <li>Identify the caller using a verified account, API key identity or appropriately derived client IP.</li>
+        <li>Build a key for the caller, the limited operation and the current minute bucket.</li>
+        <li>Atomically increment the bucket counter and establish its bounded expiration.</li>
+        <li>Allow counts 1 through 50; reject later requests with <code>429 Too Many Requests</code>.</li>
+        <li>Return useful retry information, such as <code>Retry-After</code> until the next allowed window.</li>
+      </ol>
+      <h3>Atomic operations matter</h3>
+      <p>
+        A separate read, increment in application code and write can lose updates when requests
+        overlap. Redis <code>INCR</code> handles the increment atomically, but a separate expiration
+        command can still be skipped if the application crashes. Use a correctly designed atomic
+        script or transaction for the complete counter lifecycle. Repeatedly extending a single
+        counter's TTL on every request changes the intended window behavior.
+        <a href="https://redis.io/docs/latest/commands/incr/">Redis counter and rate-limiter examples</a>.
+      </p>
+      <div class="callout callout--warn">
+        <p class="callout-label">Trust the proxy configuration</p>
+        <p>
+          Do not blindly accept <code>X-Forwarded-For</code> from the client. Derive the address using
+          a known proxy chain that sanitizes forwarded headers and correctly configured framework
+          trust settings. Otherwise callers can spoof identities to evade an IP-based limit.
+          <a href="https://expressjs.com/en/guide/behind-proxies/">Express guidance for trusted proxies</a>.
+        </p>
+      </div>
+      <p>
+        A fixed-minute window allows boundary bursts: 50 requests just before the boundary and 50
+        just after it. A sliding-window or token-bucket policy can provide different burst behavior.
+        Shared IPs also group unrelated users, which is why an authenticated identity is often a
+        better key when available.
+      </p>
+      <p>
+        Rate-limit counters are enforcement state. Evicting a counter can reset someone's allowance.
+        Decide whether storage failure should reject requests, permit a restricted fallback, or allow
+        traffic; that decision depends on whether the limit protects security, cost or availability.
+        It must be explicit rather than an accidental “all failures are cache misses” rule.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Shared, atomic counters enforce a limit across replicas.</li>
+        <li>Counter updates and expiration need coordinated handling.</li>
+        <li>Trust forwarded IPs only through configured proxies; account for bursts, eviction and outages.</li>
+      </ul></div>
+
+      <h2>Stampedes, cold starts and cache failures</h2>
+      <p>
+        A popular key expires. A thousand requests arrive before the first database read finishes.
+        Each sees a miss and repeats the same expensive query. This is a <strong>cache stampede</strong>:
+        the cache's miss path amplifies the work it was meant to save.
+      </p>
+      <ul>
+        <li><strong>Coalesce requests:</strong> let concurrent requests for one key share one in-flight load. An in-process mechanism only coordinates that process.</li>
+        <li><strong>Stagger expiration:</strong> use bounded TTL variation so many different keys do not expire together; stay within the freshness budget.</li>
+        <li><strong>Refresh selectively:</strong> refresh hot entries before expiry or serve an explicitly permitted stale result while one refresh runs.</li>
+        <li><strong>Limit fallback load:</strong> bound origin concurrency and shed excess requests rather than flooding the database.</li>
+      </ul>
+      <p>
+        Restarting or deploying a cache can produce a large cold working set. Test that state as well
+        as the warm-cache case. A cache outage can overwhelm the database if every request immediately
+        falls back to it. Use short cache deadlines and a bounded recovery path.
+        <a href="https://aws.amazon.com/builders-library/caching-challenges-and-strategies/">AWS lessons on cache failures and load</a>.
+      </p>
+      <p>
+        Stale-while-revalidate is a freshness policy, not permission to ignore correctness. It may
+        suit a public summary but conflict with an access revocation. If coordination uses locks,
+        handle timeouts and worker failures; an indefinitely held refresh lock creates another outage.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Simultaneous misses can stampede the origin.</li>
+        <li>Coalesce loads, spread expirations and cap fallback traffic.</li>
+        <li>Test cold starts and outages; serve stale data only where the contract allows it.</li>
+      </ul></div>
+
+      <h2>Measure the benefit and review the design</h2>
+      <p>
+        Cache hit rate is the fraction of lookups served from the cache. Define whether your metric
+        counts timeouts, revalidations or only normal key lookups, so comparisons remain meaningful.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Illustrative measurements, not latency guarantees</div>
+        <pre><code>hit rate = hits / (hits + misses)
+
+900 hits and 100 misses → 90% hit rate
+
+If a hit takes 2 ms and a complete miss path takes 42 ms:
+mean read time = 0.90 × 2 + 0.10 × 42 = 6 ms</code></pre>
+      </div>
+      <p>
+        The mean does not describe the slowest requests. Track p95 and p99 latency, miss latency,
+        database and provider load, memory use, evictions, expirations, cache errors and freshness
+        violations. A high hit rate can still hide incorrect data or expensive tail misses.
+      </p>
+      <h3>A practical design checklist</h3>
+      <ol>
+        <li><strong>Work:</strong> identify the repeated cost and measure the uncached path.</li>
+        <li><strong>Authority:</strong> identify the source of truth and whether entries are rebuildable.</li>
+        <li><strong>Identity:</strong> include the relevant inputs, tenant and authorized audience in the key.</li>
+        <li><strong>Freshness:</strong> define acceptable age, TTL and write invalidation or update behavior.</li>
+        <li><strong>Capacity:</strong> choose memory limits and eviction behavior suited to the data.</li>
+        <li><strong>Failure:</strong> plan for concurrent misses, cold starts, timeouts and unavailable storage.</li>
+        <li><strong>Evidence:</strong> compare latency, source load and correctness before and after caching.</li>
+      </ol>
+      <p>
+        Start with a workload that benefits from reuse. Add the smallest cache that meets its
+        freshness and failure requirements, then verify the effect. A cache is successful when it
+        saves meaningful work while preserving the application's promises to its users.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Hit rate describes reuse; latency and source load show the practical benefit.</li>
+        <li>Monitor tail latency, freshness, capacity and failures alongside averages.</li>
+        <li>Define keys, expiry, write behavior and recovery before relying on a cache.</li>
+      </ul></div>
+    </div>
+
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; a study guide for curious engineers.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+
+</div>
+
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</dialog>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>
