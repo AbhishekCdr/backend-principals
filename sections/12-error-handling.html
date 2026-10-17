@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Error Handling &amp; Fault Tolerance &middot; Backend Principles</title>
+<meta name="description" content="Backend error handling and fault tolerance: failure types, validation, configuration, health checks, observability, bounded retries, recovery, global error handlers, HTTP responses and safe logging.">
+<script>
+  (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try {
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell">
+
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 12</p>
+      <h1>Error Handling &amp; Fault Tolerance</h1>
+      <p class="lead">
+        Databases fail, dependencies time out and valid-looking requests reach unexpected edge cases.
+        Build the habit of <strong>detecting failures, limiting their impact and recovering safely</strong>,
+        while giving users useful responses and protecting their data.
+      </p>
+    </header>
+
+    <div class="prose">
+      <h2>The fault-tolerant mindset</h2>
+      <p>
+        Error handling starts when you design an operation. Decide what success means, what can fail,
+        which changes might already have happened, and how a caller should respond. A backend cannot
+        prevent every failure, but it can make failures easier to detect and less damaging to users.
+      </p>
+      <p>
+        Think of a signup request: validation, storing the account and scheduling a verification email
+        are separate steps. If the email provider is unavailable after the account is stored, the account
+        still exists. Returning an unexplained failure or claiming the email was delivered gives the user
+        a misleading picture. The response and recovery plan must reflect the actual state of the workflow.
+      </p>
+      <div class="callout callout--key">
+        <p class="callout-label">Success has a business meaning</p>
+        <p>
+          A running process and a 200 response do not prove that an operation was correct.
+          Applying a discount twice can quietly lose money while every infrastructure dashboard stays green.
+        </p>
+      </div>
+      <p>
+        Work through four questions for each important operation: how will we <strong>prevent</strong>
+        known mistakes, <strong>detect</strong> failures, <strong>contain</strong> their impact and
+        <strong>recover</strong> without corrupting data? This lesson focuses on those decisions;
+        the implementation belongs in the layers introduced in <a href="06-request-lifecycle.html">the request lifecycle</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Plan failure behavior alongside the successful path.</li>
+        <li>Distinguish a successful HTTP exchange from a correct business outcome.</li>
+        <li>For every important workflow, plan prevention, detection, containment and recovery.</li>
+      </ul></div>
+
+      <h2>Logic errors: correct execution, wrong result</h2>
+      <p>
+        A logic error lets the program run while producing the wrong outcome. An order might receive
+        the same discount twice, a shipping calculation might become negative, or a permission check
+        might use the wrong account. There may be no exception for an error handler to catch.
+      </p>
+      <p>
+        These bugs often start with misunderstood requirements, an incorrectly implemented rule or an
+        overlooked edge case. Clarify rules with concrete examples before implementation: can discounts
+        combine, what happens at a threshold, how is rounding applied, and what should a repeated request do?
+        Review these examples with the people responsible for the product rules.
+      </p>
+      <h3>Turn requirements into invariants</h3>
+      <p>
+        An <strong>invariant</strong> is a rule that must remain true through an operation. For a store
+        whose policy forbids negative shipping charges, that rule should be explicit. Other examples
+        include one redemption per eligible coupon or an order total agreeing with its line items and adjustments.
+        Write rules for the actual business; do not invent universal rules that legitimate refunds or credits violate.
+      </p>
+      <p>
+        Check important boundaries, repeated actions, concurrency and partial failure in tests. Enforce
+        appropriate invariants in the domain logic and database, and monitor outcomes in production.
+        A sudden rise in discount amounts or a mismatch between accepted orders and completed payments
+        can reveal a problem that exception counts miss.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Logic errors can damage data or business outcomes without crashing anything.</li>
+        <li>Translate ambiguous requirements into examples and explicit invariants.</li>
+        <li>Use boundary tests and business metrics; exception handling alone cannot detect incorrect results.</li>
+      </ul></div>
+
+      <h2>Database failures</h2>
+      <p>
+        Database failures have different causes and need different responses. Treating all of them as
+        bad input hides server problems; treating all of them as unexpected server failures gives users
+        no useful way to resolve ordinary conflicts.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Failure</th><th>What it can mean</th><th>What to investigate</th></tr></thead>
+        <tbody>
+          <tr><td>Connection or pool timeout</td><td>The app cannot acquire a usable connection.</td><td>Reachability, credentials, pool wait time, leaked connections and database capacity.</td></tr>
+          <tr><td>Constraint violation</td><td>A write conflicts with a unique, foreign key, required-value or check constraint.</td><td>The relevant business rule, concurrent changes and the input contract.</td></tr>
+          <tr><td>Query or schema error</td><td>Malformed SQL, an absent table or a deployment/schema mismatch.</td><td>The query and migration state; retrying a typo will not fix it.</td></tr>
+          <tr><td>Slow query or lock timeout</td><td>Work or waiting exceeded its budget.</td><td>The query plan, contention, transaction duration and load.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Connection pools are bounded resources</h3>
+      <p>
+        A pool reuses established connections and limits how many operations can use them concurrently.
+        Waiting for a pool slot is different from executing a slow query. Always release connections,
+        keep transactions appropriately short and account for the total connections across application
+        replicas. Increasing every pool size can overload the database rather than solve the bottleneck.
+      </p>
+      <h3>Validation cannot replace constraints</h3>
+      <p>
+        Two signup requests can both check that an email is available and then attempt to insert it.
+        Only one can succeed when a unique constraint protects that value. Keep database constraints
+        even when the application performs friendly checks, and handle their failures deliberately.
+        A referenced author can also disappear between an application check and a later write.
+      </p>
+      <h3>Deadlocks and transaction retries</h3>
+      <p>
+        A deadlock occurs when transactions form a cycle of waiting for one another's locks.
+        PostgreSQL detects this and aborts a transaction. Short transactions and consistent lock
+        ordering reduce the risk. For retryable deadlock or serialization failures, retry the
+        <strong>complete transaction</strong>, including the decisions that produced its queries,
+        with bounded attempts. Keep external side effects safe from duplication.
+        See <a href="https://www.postgresql.org/docs/current/mvcc-serialization-failure-handling.html">PostgreSQL's transaction retry guidance</a>.
+      </p>
+      <p>
+        An empty query result is different: ordinary SELECT queries can return zero rows successfully.
+        Some single-row driver helpers report a special “no rows” condition. The application decides
+        whether that means a missing resource or a perfectly valid empty list. The
+        <a href="08-databases.html">database lesson</a> covers the underlying constraints and transactions.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Separate connection, constraint, query and concurrency failures before deciding what to do.</li>
+        <li>Validation improves feedback; database constraints still protect against concurrent writes.</li>
+        <li>Retry whole transactions only when appropriate; an empty result is not automatically an error.</li>
+      </ul></div>
+
+      <h2>External services and uncertain outcomes</h2>
+      <p>
+        Email providers, payment services, identity providers and object stores are dependencies with
+        their own availability, limits and failure modes. DNS failures, connection problems, slow
+        responses and outages can interrupt otherwise correct application code.
+      </p>
+      <p>
+        Classify the failure before reacting. A temporary connection failure may justify another
+        attempt. A revoked integration credential needs an operator to fix it. A user's invalid login
+        is an expected authentication outcome. Your own invalid provider API key is a server configuration
+        problem, so it should not become a message telling the user to change their password.
+      </p>
+      <p>
+        Providers may also reject excess traffic with <strong>429 Too Many Requests</strong>, sometimes
+        including a <code>Retry-After</code> delay. Reduce the request rate and respect the delay where
+        supplied. If the provider's shared quota is exhausted, that does not automatically mean this
+        particular user exceeded your application's quota.
+        See <a href="https://www.rfc-editor.org/rfc/rfc6585.html#section-4">the HTTP definition of 429</a>.
+      </p>
+      <div class="callout callout--warn">
+        <p class="callout-label">A timeout leaves a question</p>
+        <p>
+          The remote operation may have completed while its response was lost. Treating a timeout as
+          proof that nothing happened can duplicate a charge, email or order. Use the provider's
+          idempotency mechanism or reconcile the operation's status before repeating a side effect.
+        </p>
+      </div>
+      <p>
+        Offload suitable work through <a href="10-background-jobs.html">durable background jobs</a>.
+        That gives delayed work a recovery path, but does not guarantee immediate delivery. Tell the
+        user whether work was accepted, remains pending or has completed.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Plan for network failures, rejected credentials, quotas and provider outages.</li>
+        <li>A timeout does not tell you whether the remote operation completed.</li>
+        <li>Protect repeated side effects and describe asynchronous progress honestly.</li>
+      </ul></div>
+
+      <h2>Validation errors at the boundary</h2>
+      <p>
+        Validate input before it reaches work that assumes a particular shape or meaning. Check types,
+        formats, required fields and limits: a date must be acceptable, a quantity must fit the allowed
+        range, and a collection must not exceed its maximum size. Invalid input can come from mistakes,
+        outdated clients or deliberate abuse.
+      </p>
+      <p>
+        Frontend validation improves the experience, but callers can bypass it. The backend enforces
+        the contract. Validate path parameters, query parameters and relevant headers as well as request
+        bodies: a GET request with no body still has inputs. Validating an ID also does not prove the
+        caller is allowed to access that resource.
+      </p>
+      <p>
+        Give safe, actionable field feedback: for a catalog that limits book names to 500 characters,
+        explain that limit when a user sends 700 characters. Do not echo arbitrary input or entire
+        request bodies into the error. Use your documented policy for 400 and 422 responses consistently,
+        as discussed in <a href="05-validation.html">Validations &amp; Transformations</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Validate types, formats, required fields and limits on the backend.</li>
+        <li>Requests without bodies still need parameter checks and authorization.</li>
+        <li>Return safe field-level guidance so callers can correct rejected input.</li>
+      </ul></div>
+
+      <h2>Configuration errors: fail before serving traffic</h2>
+      <p>
+        A feature works locally because its API key exists in a development environment file. The
+        code is deployed, but the production configuration is missing that key. Without an early
+        check, the first user to reach the feature discovers the mistake through a failed request.
+      </p>
+      <p>
+        Load and validate mandatory configuration during startup: presence, types, allowed values and
+        basic consistency. Report which setting needs attention without printing its secret value.
+        If the application cannot function safely, stop initialization before accepting traffic.
+        Optional features can instead remain explicitly disabled when their configuration is absent.
+      </p>
+      <p>
+        This works together with deployment health gates. A rollout can keep the previous healthy
+        version serving while a new version fails its checks, <strong>if that behavior is configured</strong>.
+        A startup exception alone does not guarantee a safe rollout. Check the deployment policy,
+        readiness behavior and compatibility with any schema changes.
+      </p>
+      <p>
+        Startup validation is also not a permanent guarantee. A correctly shaped credential can be
+        rejected by its provider or revoked later. Continue handling runtime failures, and validate
+        configuration changes when they are loaded or rotated.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Validate required configuration before the application starts serving users.</li>
+        <li>Failing startup protects availability only when the rollout preserves healthy capacity.</li>
+        <li>Hide secret values and handle credentials or settings becoming invalid at runtime.</li>
+      </ul></div>
+
+      <h2>Health checks and proactive detection</h2>
+      <p>
+        A health endpoint returning 200 proves only that its particular check passed. It does not
+        prove that checkout, email delivery or every database query works. Give each check a clear
+        question and connect its result to an appropriate action.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Check</th><th>Question</th><th>Typical use</th></tr></thead>
+        <tbody>
+          <tr><td>Liveness</td><td>Can this process still make progress?</td><td>Detect a stuck process that needs restarting.</td></tr>
+          <tr><td>Readiness</td><td>Can this instance accept traffic now?</td><td>Withhold traffic during initialization or an inability to serve requests.</td></tr>
+          <tr><td>Startup</td><td>Has initialization completed?</td><td>Give startup work a bounded window before normal health decisions apply.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Keep liveness focused on the process. Making a shared database outage fail every instance's
+        liveness check can trigger a restart storm without fixing the database. Readiness may consider
+        essential dependencies; an optional recommendations service should not automatically remove
+        every otherwise usable instance from traffic.
+        <a href="https://kubernetes.io/docs/concepts/workloads/pods/probes/">Kubernetes' probe documentation</a>
+        illustrates these distinct responsibilities.
+      </p>
+      <h3>Check useful work separately</h3>
+      <p>
+        Use deeper monitoring to check database connectivity, representative query performance and
+        important invariants. A lightweight query tests a narrow capability; it does not verify the
+        integrity of the whole database. Keep checks bounded and avoid repeatedly running expensive
+        queries in a frequently polled health endpoint.
+      </p>
+      <p>
+        Synthetic workflows can test an email sent to a controlled inbox or an authentication exchange
+        with a dedicated test identity. Use supported sandbox or non-chargeable checks for payment
+        integrations. Isolate test data, limit frequency and avoid real customer side effects. A check
+        that succeeded five minutes ago is useful evidence, not a promise that the next operation will succeed.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Liveness, readiness and startup checks answer different operational questions.</li>
+        <li>Keep probes cheap; do not restart healthy processes merely because a shared dependency failed.</li>
+        <li>Use controlled synthetic workflows and deeper monitoring to check actual capabilities.</li>
+      </ul></div>
+
+      <h2>Observe failures and business health</h2>
+      <p>
+        Monitoring tells you when behavior crosses an important threshold. Observability gives you
+        enough evidence to investigate what happened. Together they should cover HTTP requests,
+        database operations, external calls, background work and the business results those operations produce.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Signal</th><th>Examples</th><th>What it helps reveal</th></tr></thead>
+        <tbody>
+          <tr><td>Failures</td><td>Unexpected errors, dependency timeouts, failed jobs.</td><td>Which operations are failing and where.</td></tr>
+          <tr><td>Performance</td><td>Response-time percentiles, throughput, database pool waits.</td><td>Slow paths, contention and growing demand.</td></tr>
+          <tr><td>Capacity</td><td>Memory, CPU, queue depth and oldest job age.</td><td>Saturation or a backlog that workers cannot clear.</td></tr>
+          <tr><td>Business outcomes</td><td>Completed orders, successful logins, failed payments, discount totals.</td><td>Incorrect or incomplete work even when responses look healthy.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Rising latency or resource use can be an early warning, but interpret it alongside traffic
+        and normal patterns. A drop in successful orders needs context: did demand fall, did requests
+        fail, or did a logic change reject valid purchases? Track both counts and rates rather than
+        judging one isolated number.
+      </p>
+      <p>
+        Structured logs record named fields such as the operation, safe error category, duration and
+        request ID. Traces connect work across services. Use correlation IDs to connect an incident
+        to its evidence, while keeping secrets out of that evidence. Alert on actionable symptoms,
+        assign an owner and make the relevant recovery instructions easy to find.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Track errors, latency, throughput and resource pressure together.</li>
+        <li>Monitor business outcomes to catch failures that still return successful HTTP responses.</li>
+        <li>Connect alerts to useful context, an owner and a recovery path.</li>
+      </ul></div>
+
+      <h2>Immediate responses and safe retries</h2>
+      <p>
+        First ask whether repeating the same operation can help. Invalid input needs correction.
+        A broken query or revoked credential needs a fix. A temporary network failure may recover.
+        An unknown outcome needs investigation before repeating a side effect. “Recoverable” describes
+        an operation in context; it is not a property of every error from one service.
+      </p>
+      <h3>Bound the time and the work</h3>
+      <p>
+        Set timeouts for dependency calls and an overall deadline for the operation. Include connection
+        acquisition and network work in the budget. Stop retrying when attempts or the time budget are
+        exhausted, and propagate cancellation where supported so abandoned requests do not keep consuming resources.
+      </p>
+      <p>
+        <strong>Exponential backoff</strong> increases the delay between attempts, for example from
+        one second to two and then four. Cap the delay and add <strong>jitter</strong> so many clients
+        do not retry together. Respect a provider's Retry-After instruction; if it exceeds the current
+        request's budget, defer suitable work or return a clear failure rather than waiting indefinitely.
+      </p>
+      <p>
+        Retries add load and can repeat side effects. Coordinate retry ownership: if every layer
+        retries independently, a single user request can multiply into many downstream attempts.
+        Use idempotency for repeated writes and avoid retrying invalid requests unchanged.
+        See <a href="https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/">AWS's explanation of retry risks, backoff and jitter</a>.
+      </p>
+      <div class="callout callout--warn">
+        <p class="callout-label">More attempts are not always recovery</p>
+        <p>
+          If all database connections are busy, an immediate retry loop adds more waiting work.
+          Investigate leaked connections, slow queries and excessive concurrency. Limit admission or
+          reduce load while the bottleneck recovers; retries cannot create capacity.
+        </p>
+      </div>
+      <p>
+        For a delayed verification email, a durable job can own the retry policy and eventual failure
+        reporting. Its retry budget must also account for the verification token's expiry. Background
+        execution makes waiting possible; it does not make indefinite retries useful.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Retry only failures that can recover, and only when repeating the operation is safe.</li>
+        <li>Use deadlines, capped attempts, backoff, jitter and provider retry guidance.</li>
+        <li>Assign retry ownership and avoid adding work to an already overloaded dependency.</li>
+      </ul></div>
+
+      <h2>Containment and graceful degradation</h2>
+      <p>
+        Containment limits how far a failure spreads. Graceful degradation keeps useful functionality
+        available when a feature cannot operate normally. If recommendations fail, a product page may
+        still show its main details. If checkout cannot confirm payment, it must not pretend that the
+        purchase completed just to keep the page looking successful.
+      </p>
+      <p>
+        A <strong>circuit breaker</strong> temporarily stops calls to a dependency after a configured
+        failure pattern, then allows limited probes to check for recovery. Separate concurrency limits
+        or worker pools prevent slow optional work from occupying every resource needed by critical work.
+        These capacity boundaries are often called <strong>bulkheads</strong>.
+      </p>
+      <p>
+        Timeouts and bounded queues keep waiting work from growing without limit. Separate processes
+        and message queues can isolate failures and decouple timing, but they do not remove shared
+        database limits or make a growing backlog harmless. Apply backpressure when the system cannot
+        accept work at the incoming rate.
+      </p>
+      <h3>Choose fallbacks by what they preserve</h3>
+      <p>
+        Cached product descriptions may be acceptable within a freshness policy. Cached authorization
+        decisions or stale inventory may violate the operation's rules. If a required security check
+        is unavailable, fail closed instead of granting access. If a cache fails, sending every request
+        to the database can also overload the supposed fallback.
+      </p>
+      <p>
+        Design and capacity-check the fallback before depending on it. Explain reduced or pending
+        functionality to the user, and retain enough evidence to reconcile incomplete work. The
+        <a href="09-caching.html">caching lesson</a> distinguishes disposable cached results from state
+        that the application relies on for correctness.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Limit the spread of failures with deadlines, bounded capacity and dependency isolation.</li>
+        <li>Use fallbacks only when their freshness, permissions and capacity satisfy the operation.</li>
+        <li>Degrade optional features honestly; never turn a failed security check into permission.</li>
+      </ul></div>
+
+      <h2>Recovery without losing data</h2>
+      <p>
+        Recovery should restore correct service while preserving data. The right action depends on
+        what failed and what already changed. A database rollback cannot undo an email already sent
+        or an operation committed by another service. Reconcile those outcomes or use an explicit
+        compensating workflow where the business supports one.
+      </p>
+      <h3>Automatic recovery needs guardrails</h3>
+      <p>
+        Restarting a stuck process, retrying a safe job or switching to a healthy replica can help.
+        None is a universal fix: restarting does not repair incorrect logic, and clearing a cache
+        can send a flood of misses to the database. Use bounded recovery attempts, backoff and alerts
+        when the system cannot restore itself. Preserve pending work and expect job redelivery after crashes.
+      </p>
+      <h3>Manual recovery needs a runbook</h3>
+      <p>
+        Document how to recognize the incident, who owns it, which preconditions make a mitigation
+        safe, how to perform it and how to verify recovery. Include rollback or escalation criteria.
+        Practice in a controlled environment so an incident does not become the first attempt at
+        restoring a backup or disabling a broken feature. Confirm both service health and affected
+        business records afterward.
+      </p>
+      <h3>Backups must be restorable</h3>
+      <p>
+        Choose recovery targets: how much recent data loss is tolerable and how long restoration can
+        take. These are the recovery point objective (RPO) and recovery time objective (RTO).
+        Take protected backups and test restoration. Where supported and configured, transaction-log
+        replay can restore a database to a selected point in time.
+      </p>
+      <p>
+        A backup file existing is not evidence that the full application can recover from it.
+        Validate restored records, required configuration and dependencies. Before resuming writes,
+        account for operations completed elsewhere during the outage so recovery does not duplicate
+        them or overwrite newer state.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Recovery must preserve correctness across partial database and external-service changes.</li>
+        <li>Bound automatic recovery and document, practice and verify manual procedures.</li>
+        <li>Define recovery targets and test restores; a backup alone is not a recovery plan.</li>
+      </ul></div>
+
+      <h2>Propagate errors with useful context</h2>
+      <p>
+        Handle an error where you have enough context to make a meaningful decision. A repository
+        knows which database operation failed. A service knows what that operation means to the
+        business. The HTTP boundary knows how to express the result to the caller.
+      </p>
+      <ol>
+        <li><strong>Repository:</strong> preserve the underlying cause and classify known database outcomes using structured driver codes and known constraints.</li>
+        <li><strong>Service:</strong> interpret those outcomes in the operation's context, such as a missing book, a duplicate catalog entry or an unavailable dependency.</li>
+        <li><strong>Handler:</strong> validate incoming data and pass application failures toward the request's error boundary.</li>
+        <li><strong>Error boundary:</strong> record safe diagnostic context and produce the agreed public response.</li>
+      </ol>
+      <p>
+        Exception-based languages can throw and wrap errors; languages with explicit error values
+        return them through the call chain. Preserve the original cause while adding useful operation
+        context. A stack trace shows execution history, but does not replace the business meaning
+        of the failure.
+      </p>
+      <p>
+        Catch locally when you can recover, translate a known outcome or clean up resources. Avoid
+        catching an error merely to ignore it or replace it with a vague message that destroys its
+        cause. Ensure cleanup runs on failure as well as success. Logging the same stack trace at
+        every layer also creates noise; choose a clear owner for the final failure event.
+      </p>
+      <div class="callout callout--note">
+        <p class="callout-label">Central policy still needs local knowledge</p>
+        <p>
+          A global handler cannot infer the correct business meaning from every raw database error.
+          Translate known failures into application-level categories where their meaning is clear,
+          and keep repositories independent of HTTP response formatting.
+        </p>
+      </div>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Preserve causes and add context as failures move through application layers.</li>
+        <li>Recover or translate where the necessary knowledge exists; format HTTP responses at the boundary.</li>
+        <li>Clean up resources and avoid swallowing errors or repeatedly logging the same failure.</li>
+      </ul></div>
+
+      <h2>The global error handler</h2>
+      <p>
+        A global error handler gives request failures a consistent final boundary. It reduces repeated
+        response-building logic and provides a safe default for unexpected exceptions. Depending on
+        the framework, this might be middleware or another central exception-handling facility.
+      </p>
+      <p>
+        Known application errors have deliberate responses. Unexpected failures receive a generic
+        server-error response, while diagnostic details stay in protected internal records.
+        This separation is the central approach described by the
+        <a href="https://cheatsheetseries.owasp.org/cheatsheets/Error_Handling_Cheat_Sheet.html">OWASP Error Handling Cheat Sheet</a>.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Response element</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td>HTTP status</td><td>Describe the broad outcome using HTTP semantics.</td></tr>
+          <tr><td>Stable application error code</td><td>Let clients recognize a known failure without parsing human wording.</td></tr>
+          <tr><td>Public message</td><td>Explain the problem and any useful next step without exposing internals.</td></tr>
+          <tr><td>Safe field details</td><td>Identify correctable input problems where appropriate.</td></tr>
+          <tr><td>Request or correlation ID</td><td>Connect a user's report to internal diagnostic evidence.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Keep the shape and policy consistent across routes. Share translations for recognized errors,
+        but leave an unknown failure unknown rather than guessing that it must be the client's fault.
+        This policy can be implemented by several small components; it does not require one enormous function.
+      </p>
+      <h3>The boundary has limits</h3>
+      <p>
+        Request middleware cannot catch every failure in a separate worker, every unobserved asynchronous
+        task or a process that crashes. Give jobs and other entry points their own error boundaries.
+        If response headers have already been sent, the server cannot replace the response with a new
+        status and error body; streaming protocols need their own failure behavior.
+      </p>
+      <p>
+        An unrecoverable process failure may require controlled shutdown and a supervised restart.
+        Do not blindly keep serving from potentially invalid state. A global handler standardizes
+        recoverable request failures; it neither repairs logic bugs nor proves the entire process is healthy.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Centralize public error policy, response shape and the safe fallback for unknown failures.</li>
+        <li>Use stable application codes and correlation IDs alongside HTTP statuses and useful messages.</li>
+        <li>Workers, fatal process errors and streams need boundaries beyond ordinary request middleware.</li>
+      </ul></div>
+
+      <h2>Choose HTTP responses from the operation's meaning</h2>
+      <p>
+        The layer where a failure originated does not determine its HTTP status. A database conflict
+        can be an expected application outcome; malformed SQL is a server bug. Apply the public
+        contract using the meaning of the operation and what the caller can safely learn.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Status</th><th>Typical meaning</th></tr></thead>
+        <tbody>
+          <tr><td>400 Bad Request</td><td>Malformed or otherwise invalid request under the API's contract.</td></tr>
+          <tr><td>422 Unprocessable Content</td><td>The content is syntactically valid but its instructions cannot be processed.</td></tr>
+          <tr><td>401 Unauthorized</td><td>Valid authentication credentials are missing; include the appropriate authentication challenge.</td></tr>
+          <tr><td>403 Forbidden</td><td>The server refuses the requested action.</td></tr>
+          <tr><td>404 Not Found</td><td>The target resource is absent or its existence is intentionally concealed.</td></tr>
+          <tr><td>409 Conflict</td><td>The request conflicts with the resource's current state.</td></tr>
+          <tr><td>429 Too Many Requests</td><td>The caller exceeded a request-rate limit.</td></tr>
+          <tr><td>500 Internal Server Error</td><td>An unexpected server condition prevented completion.</td></tr>
+          <tr><td>503 Service Unavailable</td><td>The service is temporarily unable to handle the request.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        These distinctions follow <a href="https://www.rfc-editor.org/rfc/rfc9110.html#name-status-codes">HTTP semantics</a>
+        and <a href="https://www.rfc-editor.org/rfc/rfc6585.html#section-4">the definition of 429</a>.
+        Document the choices your API makes instead of letting each endpoint invent a different policy.
+      </p>
+      <h3>A book catalog example</h3>
+      <ul>
+        <li><strong>Name too long:</strong> a 700-character name violates the catalog's 500-character rule. Return the documented validation status with a safe message about that field.</li>
+        <li><strong>Duplicate name:</strong> if this particular catalog requires unique names, a recognized uniqueness conflict can become 409. Book names are not inherently unique across every real catalog.</li>
+        <li><strong>Missing book:</strong> a lookup for book 123 finds no accessible resource. The service produces a not-found outcome and the boundary returns 404. An empty search result can still return 200 with an empty collection.</li>
+        <li><strong>Invalid author reference:</strong> an author ID in a create-book body cannot be used. Depending on the documented contract, this can be a 422 validation outcome or a 409 state conflict. If the request directly addresses a missing author resource, 404 may be appropriate.</li>
+      </ul>
+      <p>
+        Do not translate every unique or foreign key violation automatically into a client error.
+        An unexpected constraint failure can reveal an application bug. Use known driver codes and
+        constraint mappings instead of fragile checks against human-readable database messages.
+        Authorization and privacy also affect how much resource information the response should reveal.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Map application meaning to HTTP status; the originating layer is not enough.</li>
+        <li>Missing individual resources differ from empty collections, and conflicts differ from server bugs.</li>
+        <li>Translate recognized constraints deliberately and document validation and conflict responses.</li>
+      </ul></div>
+
+      <h2>Public messages and account enumeration</h2>
+      <p>
+        Public messages should help callers use the API without exposing SQL, constraint names,
+        stack traces, credentials or internal paths. An unknown failure can say “Something went wrong”
+        and include a support reference. Keep the underlying cause in protected diagnostics.
+        Hiding details reduces information exposure; it does not replace parameterized queries or authorization.
+      </p>
+      <h3>Authentication needs deliberate ambiguity</h3>
+      <p>
+        If login says “email not found” for one address and “password incorrect” for another, an attacker
+        can discover which accounts exist. Use a shared response such as <strong>“Invalid email or password”</strong>
+        for failed credentials, without distinguishing a nonexistent, disabled or locked account.
+      </p>
+      <p>
+        Wording alone is insufficient if response status, shape, redirects or processing time reveal
+        the difference. Use established authentication flows that avoid obvious timing discrepancies.
+        Review registration and password-reset responses too; a reset flow can acknowledge the request
+        generically without confirming that an account exists. Combine this with abuse controls rather
+        than treating generic messages as a complete defense.
+        See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html#authentication-responses">OWASP's authentication response guidance</a>.
+      </p>
+      <p>
+        This is where public error policies need context. A helpful duplicate-entry message in an
+        internal catalog is not automatically appropriate for a public signup form. Revisit the
+        privacy requirements from <a href="04-auth.html">Authentication &amp; Authorization</a> when
+        applying a shared error format to identity-related routes.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Return deliberately written public messages and keep internal diagnostics private.</li>
+        <li>Authentication failures must avoid revealing account existence through messages or other differences.</li>
+        <li>A shared error format still needs context-sensitive disclosure rules.</li>
+      </ul></div>
+
+      <h2>Logs that help without exposing users</h2>
+      <p>
+        Logs often leave the application process for collection, storage and analysis. Treat them as
+        sensitive records. Capture the operation, safe error category and correlation ID; prefer an
+        opaque user ID over an email when identity is necessary. User IDs still require protection.
+      </p>
+      <p>
+        Exclude passwords, API keys, bearer tokens, session cookies, reset codes and payment-card data.
+        Avoid logging complete bodies or authorization headers. Redact nested exception metadata too;
+        a provider or database error can contain sensitive values even when your own message does not.
+      </p>
+      <p>
+        Use structured fields and safe encoding to prevent untrusted text from forging log entries.
+        Restrict access, protect transport and storage, and set retention deliberately. Use severity
+        consistently: expected input rejection is different from an unexpected service failure.
+        The <a href="https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html">OWASP Logging Cheat Sheet</a>
+        covers data exclusion and log protection.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Keep enough safe context to investigate an error without recording secrets or unnecessary personal data.</li>
+        <li>Redact exception metadata as well as your own messages, and prevent log injection.</li>
+        <li>Protect log access, transport, storage and retention as part of the error-handling design.</li>
+      </ul></div>
+    </div>
+
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; a study guide for curious engineers.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+
+</div>
+
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</dialog>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Full-Text Search &middot; Backend Principles</title>
+<meta name="description" content="Backend full-text search notes covering inverted indexes, analyzers, BM25, PostgreSQL text search and trigrams, Elasticsearch mappings and queries, synchronization, benchmarks and safe search APIs.">
+<script>
+  (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try {
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell">
+
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 11</p>
+      <h1>Full-Text Search</h1>
+      <p class="lead">
+        Finding text is only part of search. Users also need useful ordering, sensible handling of
+        typos and fast responses. Learn how <strong>inverted indexes and text analysis</strong>
+        support those goals, and how PostgreSQL and Elasticsearch approach the problem.
+      </p>
+    </header>
+
+    <div class="prose">
+      <h2>From substring matching to useful search</h2>
+      <p>
+        A small catalog can start with a simple substring query. For an existing products table,
+        the following searches its name and description using a case-insensitive pattern. The
+        application binds <code>$1</code> to a value such as <code>%laptop%</code>.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>PostgreSQL — a bounded substring search</div>
+        <pre><code data-example="sql">SELECT id, name, description
+FROM products
+WHERE name ILIKE $1 OR description ILIKE $1
+ORDER BY id
+LIMIT 20;</code></pre>
+      </div>
+      <p>
+        <code>%</code> matches any sequence of characters and <code>_</code> matches one character.
+        Binding the pattern avoids SQL injection, but these wildcard meanings still apply. If the
+        API promises literal substring search, escape user-supplied wildcards and the escape character
+        before adding the surrounding <code>%</code> characters.
+      </p>
+      <p>
+        This query answers whether the pattern occurs. It does not decide whether a laptop is a better
+        result than a laptop bag, correct a typo such as <code>laptpo</code>, or infer that a product
+        is a laptop when no searchable text says so. Ordering by ID is predictable, but is not relevance ranking.
+      </p>
+      <div class="callout callout--key">
+        <p class="callout-label">The query and index determine the work</p>
+        <p>
+          A leading-wildcard search without a suitable index may scan many rows. A normal B-tree
+          usually cannot make an arbitrary <code>%term%</code> search efficient. That does not mean
+          relational databases must always scan every row: PostgreSQL has both full-text indexes and
+          trigram indexes for different search needs.
+        </p>
+      </div>
+      <p>
+        As the catalog and traffic grow, define the required behavior first: literal substrings,
+        words, phrases, prefixes, spelling variants or meaning. These are different contracts with
+        different costs. A row count alone cannot tell you which system is necessary.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>ILIKE matches a pattern; relevance, typos and semantic relationships need additional design.</li>
+        <li>Bound queries, bind values and define whether user input contains literal text or wildcards.</li>
+        <li>Search performance depends on the query, available indexes and workload.</li>
+      </ul></div>
+
+      <h2>The inverted index</h2>
+      <p>
+        A direct approach asks each document whether it contains a term. An <strong>inverted index</strong>
+        records which documents contain each term, allowing a query to start from the term instead.
+        The mapping is inverted: document-to-words becomes word-to-documents.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>A small document collection</div>
+        <pre><code>D1: Introduction to machine learning
+D2: Coffee machine manual
+D3: Learning to cook
+
+Illustrative postings lists after lowercasing:
+machine  → D1, D2
+learning → D1, D3</code></pre>
+      </div>
+      <p>
+        A query requiring both terms can intersect those lists and find D1. A query allowing either
+        term can combine them and find D1, D2 and D3. A <strong>postings list</strong> can carry document
+        identifiers, occurrence counts and term positions, depending on the index configuration.
+      </p>
+      <p>
+        Positions help distinguish the phrase “machine learning” from two words scattered throughout
+        a long document. They normally refer to token positions, not physical book page numbers.
+        The index narrows candidates; ranking then decides their order. It does not by itself make
+        every matching document useful.
+      </p>
+      <p>
+        The cost moves partly to ingestion: the system analyzes documents and maintains search
+        structures as data changes. Storage and indexing work increase in exchange for avoiding
+        repeated scans at query time. Broad queries can still match a large part of the collection.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>An inverted index maps terms to documents containing them.</li>
+        <li>Combining postings finds candidates; positions support phrase and proximity behavior.</li>
+        <li>Faster retrieval requires indexing work and storage, and still needs relevance ranking.</li>
+      </ul></div>
+
+      <h2>Analysis: turning text into searchable terms</h2>
+      <p>
+        Search engines usually transform text before indexing it. A typical analysis pipeline splits
+        text into tokens, normalizes them and applies optional language rules. The chosen pipeline
+        determines what can match later.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Step</th><th>Purpose</th><th>Design concern</th></tr></thead>
+        <tbody>
+          <tr><td>Tokenization</td><td>Identify searchable pieces of text.</td><td>Word boundaries, punctuation and identifiers vary by language and domain.</td></tr>
+          <tr><td>Normalization</td><td>Make selected variants comparable, such as upper- and lowercase.</td><td>Case and accents can be meaningful for some fields.</td></tr>
+          <tr><td>Stemming</td><td>Reduce related word forms toward a common searchable form.</td><td>Language-specific rules can also merge terms you intended to keep distinct.</td></tr>
+          <tr><td>Stop-word handling</td><td>Optionally remove common words.</td><td>Removing words can matter for names, phrases and short queries.</td></tr>
+          <tr><td>Synonyms</td><td>Apply configured relationships between terms.</td><td>Domain-specific synonyms require maintenance and relevance testing.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        PostgreSQL calls normalized searchable forms <strong>lexemes</strong> and stores them in a
+        <code>tsvector</code>. Its query representation is a <code>tsquery</code>. Elasticsearch uses
+        field analyzers for indexed text and compatible search analysis for queries.
+        <a href="https://www.postgresql.org/docs/current/textsearch-intro.html">PostgreSQL text-search concepts</a>.
+      </p>
+      <p>
+        Lowercasing an entire query string manually is not a substitute for using the correct
+        analyzer. Product codes, English reviews and multilingual names may need different handling.
+        Test how both documents and queries are analyzed, including punctuation and inputs that
+        reduce entirely to stop words.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Analysis determines the terms that exist in the index and how a query matches them.</li>
+        <li>Stemming, stop words and synonyms are configurable behavior, not universal defaults.</li>
+        <li>Use compatible index and query analysis suited to the field's language and purpose.</li>
+      </ul></div>
+
+      <h2>Relevance, BM25 and field boosting</h2>
+      <p>
+        Matching selects candidates; scoring orders them. Elasticsearch uses BM25 as its default
+        text similarity. You do not need to derive the formula to use it, but its main signals help
+        explain surprising results.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Signal</th><th>Intuition</th></tr></thead>
+        <tbody>
+          <tr><td>Term frequency</td><td>More occurrences in a field can increase relevance, with diminishing returns.</td></tr>
+          <tr><td>Document frequency</td><td>A term found in fewer documents is generally more discriminating.</td></tr>
+          <tr><td>Field length</td><td>Length normalization prevents long text from winning simply by containing more words.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        BM25's <code>k1</code> controls term-frequency saturation and <code>b</code> controls length
+        normalization. These are tuning parameters, not a reason to change defaults without evidence.
+        <a href="https://www.elastic.co/docs/reference/elasticsearch/index-settings/similarity">Elasticsearch similarity settings</a>.
+      </p>
+      <h3>The title is important because you say it is</h3>
+      <p>
+        A field named <code>title</code> does not automatically receive a special business priority.
+        A query can explicitly boost it relative to a description. For a product index with those
+        analyzed fields, this is one possible query:
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Elasticsearch query body — product field boosts</div>
+        <pre><code data-example="json">{
+  "size": 20,
+  "query": {
+    "multi_match": {
+      "query": "lightweight laptop",
+      "fields": ["title^3", "description"],
+      "operator": "and"
+    }
+  }
+}</code></pre>
+      </div>
+      <p>
+        The boost changes score contributions; it does not guarantee a particular product is first.
+        This default <code>multi_match</code> mode requires both terms within a matching field when
+        <code>operator</code> is <code>and</code>. Combining words across separate fields requires a
+        query mode designed for that behavior.
+        <a href="https://www.elastic.co/docs/reference/query-languages/query-dsl/query-dsl-multi-match-query">Multi-match behavior and boosts</a>.
+      </p>
+      <p>
+        A relevance score is not a probability that a result is correct. Boosts, corpus statistics and
+        query structure affect it. If “MacBook” should match “laptop” without a shared term, provide
+        suitable product metadata, synonyms or a separate semantic retrieval capability. Lexical
+        scoring does not invent that relationship.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>BM25 uses frequency, rarity and length normalization to rank lexical matches.</li>
+        <li>Field boosting is an explicit query choice; more occurrences do not always mean a better result.</li>
+        <li>Scores need evaluation against real search intent and are not correctness probabilities.</li>
+      </ul></div>
+
+      <h2>Typos, autocomplete and meaning</h2>
+      <p>
+        These features often appear together in a search box, but solve different problems. A fast
+        full-text index does not automatically enable every one of them.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Feature</th><th>Example</th><th>Typical mechanism</th></tr></thead>
+        <tbody>
+          <tr><td>Typo tolerance</td><td><code>laptpo</code> should find <code>laptop</code>.</td><td>Fuzzy matching based on allowed character edits or a spelling-correction workflow.</td></tr>
+          <tr><td>Autocomplete / typeahead</td><td><code>lap</code> should suggest laptop-related results.</td><td>Prefix-aware queries, n-gram indexing or a dedicated suggestion field.</td></tr>
+          <tr><td>Synonym matching</td><td>A domain treats two names as equivalent.</td><td>Configured synonym rules or enriched searchable metadata.</td></tr>
+          <tr><td>Semantic retrieval</td><td>Find a relevant concept without shared words.</td><td>A separate meaning-based retrieval approach, possibly combined with lexical results.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Elasticsearch's <code>match</code> query supports configurable fuzziness. It expands possible
+        term matches; it does not understand every sentence or guarantee the intended correction.
+        Excessive expansion can increase cost and introduce irrelevant results. Do not assume
+        fuzzy matching is appropriate for exact identifiers such as order numbers.
+        <a href="https://www.elastic.co/docs/reference/query-languages/query-dsl/full-text-queries">Full-text query options</a>.
+      </p>
+      <p>
+        For typeahead, Elasticsearch has a <code>search_as_you_type</code> field with supporting
+        subfields, commonly queried with <code>multi_match</code> and <code>bool_prefix</code>.
+        Choose the mapping and query together rather than wrapping each keystroke in leading wildcards.
+        <a href="https://www.elastic.co/docs/reference/elasticsearch/mapping-reference/search-as-you-type">Search-as-you-type fields</a>.
+      </p>
+      <p>
+        In the UI, debounce rapid input, limit suggestion counts and ignore stale responses that
+        arrive after a newer query. Set minimum input lengths and sensible timeouts. A familiar
+        search interface demonstrates a product behavior; it does not reveal whether its provider
+        uses Elasticsearch, Lucene or a proprietary retrieval system.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Typo tolerance, prefixes, synonyms and semantic retrieval are distinct capabilities.</li>
+        <li>Fuzzy matching requires configuration and can add cost and false positives.</li>
+        <li>Typeahead needs a compatible index, bounded queries and protection against stale UI responses.</li>
+      </ul></div>
+
+      <h2>PostgreSQL full-text search</h2>
+      <p>
+        PostgreSQL can analyze text, index searchable lexemes and rank matches without a separate
+        search service. The following standalone example models the review-and-sentiment dataset
+        from the lecture. Apply schema changes through migrations as covered in
+        <a href="08-databases.html">Databases &amp; PostgreSQL</a>.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Example schema — an analyzed vector and GIN index</div>
+        <pre><code data-example="sql">CREATE TABLE reviews (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    review text NOT NULL,
+    sentiment text NOT NULL CHECK (sentiment IN ('positive', 'negative')),
+    search_vector tsvector GENERATED ALWAYS AS (
+        to_tsvector('english', review)
+    ) STORED
+);
+
+CREATE INDEX reviews_search_vector_idx
+    ON reviews USING GIN (search_vector);</code></pre>
+      </div>
+      <p>
+        The stored generated column keeps the vector synchronized when the review changes. GIN
+        supports efficient lookup of matching lexemes. Explicitly selecting the language configuration
+        makes the indexing behavior reproducible.
+        <a href="https://www.postgresql.org/docs/current/textsearch-tables.html">PostgreSQL text-search tables and indexes</a>.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Query — bind the user's search text to $1</div>
+        <pre><code data-example="sql">WITH input AS (
+    SELECT websearch_to_tsquery('english', $1) AS query
+)
+SELECT r.id, r.review, r.sentiment,
+       ts_rank_cd(r.search_vector, input.query) AS rank
+FROM reviews AS r
+CROSS JOIN input
+WHERE r.search_vector @@ input.query
+ORDER BY rank DESC, r.id
+LIMIT 20;</code></pre>
+      </div>
+      <p>
+        <code>websearch_to_tsquery</code> accepts ordinary text and supports quoted phrases,
+        <code>OR</code> and negation. <code>@@</code> tests a match; <code>ts_rank_cd</code> provides
+        a ranking that considers proximity. These built-in ranks are not Elasticsearch's BM25 scores.
+        The GIN index helps find matches; it does not directly provide the final rank order.
+        <a href="https://www.postgresql.org/docs/current/textsearch-controls.html">PostgreSQL query construction and ranking</a>.
+      </p>
+      <p>
+        Keep binding user values instead of interpolating SQL. The same English configuration is
+        used on both sides. An empty or stop-word-only query can produce no searchable terms; define
+        that behavior in the API. Indexes still cost storage and write work, so inspect query plans
+        and latency on a representative dataset.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>PostgreSQL full-text search combines tsvector, tsquery, matching and ranking.</li>
+        <li>A generated vector plus GIN index supports indexed lexical search.</li>
+        <li>Use consistent language configuration, bound values and measured query plans.</li>
+      </ul></div>
+
+      <h2>Trigrams for substring and similarity search</h2>
+      <p>
+        If the requirement is still <code>ILIKE '%laptop%'</code>, PostgreSQL's <code>pg_trgm</code>
+        extension offers another route. It indexes character trigrams and supports indexed
+        <code>LIKE</code>/<code>ILIKE</code> and similarity operations.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Optional index for the reviews table — extension must be available</div>
+        <pre><code data-example="sql">CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE INDEX reviews_review_trgm_idx
+    ON reviews USING GIN (review gin_trgm_ops);
+
+SELECT id, review, sentiment
+FROM reviews
+WHERE review ILIKE $1
+ORDER BY id
+LIMIT 20;</code></pre>
+      </div>
+      <p>
+        Bind <code>$1</code> to the intended pattern. Trigram support can accelerate the existing
+        substring contract without changing it into word-based search. Very short or broad patterns
+        may provide too few useful trigrams to be selective. Similarity operators can also support
+        typo-related features, with thresholds that need testing.
+        <a href="https://www.postgresql.org/docs/current/pgtrgm.html">PostgreSQL pg_trgm</a>.
+      </p>
+      <p>
+        Full-text and trigram indexes solve different problems. Add each only for the queries that
+        justify its storage and maintenance cost; installing both is not a prerequisite for search.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Trigram indexes can support substring matching and similarity searches.</li>
+        <li>Short, broad patterns can remain expensive.</li>
+        <li>Choose word-based or character-based indexing from the required behavior.</li>
+      </ul></div>
+
+      <h2>Elasticsearch documents, mappings and Lucene</h2>
+      <p>
+        Elasticsearch exposes search and indexing APIs around a distributed data store. An
+        Elasticsearch <strong>index</strong> groups documents; a document is a JSON representation
+        of an entity. A <strong>mapping</strong> describes how fields are interpreted and indexed.
+        This use of “index” is broader than one SQL index on a table column.
+      </p>
+      <p>
+        Elasticsearch builds on Apache Lucene: each Elasticsearch shard contains a Lucene index.
+        PostgreSQL implements its own full-text facilities; it does not need Lucene to offer text
+        search. Different products can use the same general inverted-index idea.
+        <a href="https://www.elastic.co/docs/deploy-manage/distributed-architecture/clusters-nodes-shards">Elasticsearch shards and Lucene</a>.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>PUT /reviews — mapping for a new example index</div>
+        <pre><code data-example="json">{
+  "mappings": {
+    "properties": {
+      "review": {
+        "type": "text",
+        "analyzer": "english"
+      },
+      "sentiment": {
+        "type": "keyword"
+      }
+    }
+  }
+}</code></pre>
+      </div>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Field type</th><th>Behavior</th><th>Example use</th></tr></thead>
+        <tbody>
+          <tr><td><code>text</code></td><td>Analyze a string into searchable terms.</td><td>Natural-language reviews, titles and descriptions.</td></tr>
+          <tr><td><code>keyword</code></td><td>Index a whole value for exact matching, with optional configured normalization.</td><td>Sentiment labels, IDs, categories, sorting and aggregations.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        A text field is not “a string without discrimination”: its analysis is precisely what changes
+        matching behavior. A keyword field does not infer synonyms or word forms. When one value
+        needs both analyzed search and exact sorting, a text field can have a keyword subfield.
+        <a href="https://www.elastic.co/docs/reference/elasticsearch/mapping-reference/text">Text fields</a> and
+        <a href="https://www.elastic.co/docs/reference/elasticsearch/mapping-reference/keyword">keyword fields</a>.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>PUT /reviews/_doc/1?refresh=wait_for — one example document</div>
+        <pre><code data-example="json">{
+  "review": "A lightweight laptop with a clear screen.",
+  "sentiment": "positive"
+}</code></pre>
+      </div>
+      <p>
+        Use the source database's stable ID as the document ID when indexing a copy of a row.
+        <code>refresh=wait_for</code> can wait for search visibility in a small read-after-write
+        demonstration; requiring that on every ingestion request has throughput consequences.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Documents, field mappings and shards are distinct parts of the Elasticsearch model.</li>
+        <li>Use analyzed text for words and keyword fields for exact values.</li>
+        <li>Elasticsearch builds on Lucene; PostgreSQL full-text search is a separate implementation.</li>
+      </ul></div>
+
+      <h2>Query DSL: score text and filter exact values</h2>
+      <p>
+        Elasticsearch's JSON Query DSL describes the search operation. The following example requests
+        positive reviews matching a deliberately misspelled query. It is a fuzzy lexical search,
+        unlike the earlier literal substring query.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>POST /reviews/_search — bounded results and an exact filter</div>
+        <pre><code data-example="json">{
+  "size": 20,
+  "track_total_hits": true,
+  "_source": ["review", "sentiment"],
+  "query": {
+    "bool": {
+      "must": [
+        {
+          "match": {
+            "review": {
+              "query": "laptpo",
+              "fuzziness": "AUTO"
+            }
+          }
+        }
+      ],
+      "filter": [
+        { "term": { "sentiment": "positive" } }
+      ]
+    }
+  }
+}</code></pre>
+      </div>
+      <p>
+        <code>match</code> analyzes the input against the text field. <code>fuzziness</code> permits
+        configured spelling variation. The <code>term</code> filter matches the keyword sentiment
+        value exactly. Filter clauses restrict eligibility without adding relevance score; the text
+        clause contributes to <code>_score</code>.
+        <a href="https://www.elastic.co/docs/reference/query-languages/query-dsl/query-dsl-bool-query">Boolean queries and filter context</a>.
+      </p>
+      <p>
+        Results appear under <code>hits.hits</code>, with document IDs, scores and selected source
+        fields. The total match count is separate from the returned page. This example explicitly
+        requests exact total tracking; that adds work and is not necessary for every product.
+        In <code>hits.total.relation</code>, <code>eq</code> means an exact count and <code>gte</code>
+        means a lower bound. Also inspect <code>timed_out</code> and shard failures before treating
+        the results as complete.
+        <a href="https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-search">Search response fields</a>.
+      </p>
+      <h3>Why not pass user input straight into query_string?</h3>
+      <p>
+        <code>query_string</code> accepts a search mini-language with operators and special characters.
+        It is not the same as plain user text. Wrapping input in <code>*...*</code> can introduce
+        expensive leading-wildcard searches and does not reproduce SQL substring semantics on an
+        analyzed field. Prefer a query suited to the intended contract; expose advanced syntax only
+        when deliberately supported and bounded.
+        <a href="https://www.elastic.co/docs/reference/query-languages/query-dsl/query-dsl-query-string-query">Query-string syntax and wildcard costs</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use text queries for analyzed matching and keyword filters for exact conditions.</li>
+        <li>Result page size and total match count are different; exact counting can cost more.</li>
+        <li>Raw query syntax and leading wildcards require deliberate controls.</li>
+      </ul></div>
+
+      <h2>Keeping the search index synchronized</h2>
+      <p>
+        When PostgreSQL owns the business data and Elasticsearch holds searchable copies, every
+        create, update and deletion must eventually reach the search index. Two successful inserts
+        during initial setup do not solve ongoing synchronization.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>A common derived-index workflow</div>
+        <pre><code>Application transaction → authoritative database + durable change record
+                                               │
+                                               ▼
+                                    indexing worker / change capture
+                                               │
+                                               ▼
+                                        search document
+                                               │ refresh
+                                               ▼
+                                       searchable result</code></pre>
+      </div>
+      <p>
+        A durable outbox or change-data-capture pipeline can avoid losing an indexing update between
+        a database commit and a separate network call. Retry with stable IDs and version checks so
+        older events do not overwrite newer data. Handle deletes too, and measure indexing lag.
+        These are applications of <a href="10-background-jobs.html">Background Jobs</a>.
+      </p>
+      <p>
+        Elasticsearch search is near real time: an acknowledged write can need a refresh before it
+        appears in search results. Delivery lag from the database and refresh delay are separate.
+        <a href="https://www.elastic.co/docs/manage-data/data-store/near-real-time-search">Near-real-time search</a>.
+      </p>
+      <p>
+        Preserve a way to rebuild the index from authoritative data. Analyzer or mapping changes
+        may require reindexing into a new index and switching the application to it. Plan how updates
+        arriving during that rebuild are captured, rather than deleting the live index to start over.
+      </p>
+      <p>
+        Search results can be stale. Enforce current authorization and critical stock or price
+        decisions at the appropriate authoritative boundary. A deleted private document must not
+        remain accessible merely because its search copy has not caught up.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>A separate search index needs reliable create, update and delete propagation.</li>
+        <li>Use stable identity, ordering/version protection and observable indexing lag.</li>
+        <li>Plan rebuilds and protect sensitive operations from stale search data.</li>
+      </ul></div>
+
+      <h2>Preparing the 50,000-review experiment</h2>
+      <p>
+        The lecture describes loading 50,000 review-and-sentiment records into PostgreSQL and
+        Elasticsearch, then comparing searches. The following is a reproducibility checklist for
+        that experiment, not a claim that the original dataset or cloud instances were tested here.
+      </p>
+      <ol>
+        <li><strong>Record the dataset:</strong> document its source, permitted use and a fixed version or checksum.</li>
+        <li><strong>Parse CSV correctly:</strong> reviews can contain commas, quotes and embedded newlines; use a real CSV parser.</li>
+        <li><strong>Validate once:</strong> create one accepted record set with nonempty review text and the same allowed sentiment values.</li>
+        <li><strong>Keep identity consistent:</strong> use the same record IDs and text in both systems.</li>
+        <li><strong>Create explicit schemas:</strong> document PostgreSQL indexes and Elasticsearch mappings and analyzers.</li>
+        <li><strong>Load bounded batches:</strong> choose sizes by byte volume, limits and measured throughput, not a supposedly universal 1,000-row rule.</li>
+        <li><strong>Verify completeness:</strong> compare IDs and sample values, inspect ingestion errors and wait for search visibility.</li>
+      </ol>
+      <p>
+        PostgreSQL inserts can use parameterized batches or an appropriate bulk-loading mechanism.
+        Elasticsearch's Bulk API can return successful and failed items in the same response. Inspect
+        each item and retry suitable failures; an HTTP success response alone does not mean every
+        document was indexed.
+        <a href="https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-bulk">Elasticsearch Bulk API</a>.
+      </p>
+      <p>
+        Equal counts are necessary but not sufficient: two collections can each contain 50,000
+        records while containing different data. Use isolated experiment tables and indexes. A
+        reset-and-reload script must never point at production by accident; keep credentials on the
+        server and separate development resources from live ones.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use the same validated records and stable IDs in both systems.</li>
+        <li>Inspect bulk item failures and confirm data is searchable before measuring.</li>
+        <li>Document the corpus and configuration so another person can reproduce the experiment.</li>
+      </ul></div>
+
+      <h2>Benchmark the same work</h2>
+      <p>
+        A demonstration where one request finishes sooner is evidence about those requests under
+        those conditions. It does not establish a universal PostgreSQL-versus-Elasticsearch speed
+        ratio. The lecture's reported timings are illustrative observations, not guarantees for a
+        new deployment.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Control</th><th>Why it matters</th></tr></thead>
+        <tbody>
+          <tr><td>Matching semantics</td><td>Substring, stemmed-word, fuzzy and phrase searches can match different documents.</td></tr>
+          <tr><td>Indexes and analyzers</td><td>An unindexed scan versus indexed retrieval tests different access methods, not every capability of each engine.</td></tr>
+          <tr><td>Result size and counts</td><td>Returning every SQL row versus one Elasticsearch page is unequal work. Exact counts must be requested consistently.</td></tr>
+          <tr><td>Returned fields and bytes</td><td>Serialization, transfer and rendering can dominate a large response.</td></tr>
+          <tr><td>Infrastructure</td><td>The same region does not equal the same CPU, memory, storage, shard layout, network path or service tier.</td></tr>
+          <tr><td>Warmth and concurrency</td><td>Connection setup, serverless cold starts, caches, background indexing and concurrent load affect timings.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Separate execution time from user-visible latency</h3>
+      <p>
+        Measure the client-observed duration consistently around each complete request. Database
+        execution plans and Elasticsearch's <code>took</code> help diagnose server-side work, but
+        are not interchangeable with end-to-end timing. A streamed UI can display each result as it
+        arrives; streaming does not by itself make either query faster or prove the comparison is fair.
+        <a href="https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-search">Elasticsearch's took measurement</a>.
+      </p>
+      <p>
+        Use a representative query set, repeated runs and stated concurrency. Report cold and warm
+        behavior separately, include p50/p95/p99 and errors, and record enough samples for those
+        percentiles to be meaningful. Alternating query order helps avoid favoring whichever run
+        consistently gets a warmer system.
+      </p>
+      <p>
+        A useful study can compare several approaches: the original substring query, trigram-indexed
+        substring search, PostgreSQL full-text search and Elasticsearch full-text search. Keep
+        semantic differences explicit rather than declaring every query interchangeable. Matching
+        counts alone do not prove equivalent matching or ordering.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Match semantics, returned data, count behavior and environment before comparing speed.</li>
+        <li>Measure end-to-end and server-side time separately.</li>
+        <li>Use repeated, representative workloads and report distributions rather than one stopwatch result.</li>
+      </ul></div>
+
+      <h2>Choosing PostgreSQL or Elasticsearch</h2>
+      <p>
+        Start with required behavior and measured constraints. PostgreSQL may already supply the
+        indexing and ranking a product needs. A separate search service becomes useful when its
+        search capabilities, independent scaling or operational fit justify another system.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Consideration</th><th>PostgreSQL approach</th><th>Elasticsearch approach</th></tr></thead>
+        <tbody>
+          <tr><td>Data location</td><td>Search can remain beside authoritative relational data.</td><td>Often uses a separate searchable representation that needs synchronization.</td></tr>
+          <tr><td>Search behavior</td><td>Native lexical search, ranking and optional trigram capabilities.</td><td>A broad search DSL, analysis, fuzzy queries, suggestions and aggregations.</td></tr>
+          <tr><td>Scaling and workload</td><td>Search shares database resources unless separately provisioned.</td><td>Search capacity can be scaled separately, with its own cluster and shard considerations.</td></tr>
+          <tr><td>Operations</td><td>Fewer moving parts when PostgreSQL is already in use.</td><td>Additional capacity, monitoring, access control, backups and reindexing work.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>The ELK connection</h3>
+      <p>
+        ELK historically names <strong>Elasticsearch, Logstash and Kibana</strong>: search and analytics,
+        ingestion and transformation, and exploration and visualization. Log analysis is one use of
+        the <a href="https://www.elastic.co/elastic-stack">Elastic Stack</a>, separate from building
+        a customer-facing product-search API.
+      </p>
+      <p>
+        Having a logging deployment provides familiarity, but is not automatic permission or capacity
+        to add product search to the same cluster. Evaluate isolation, access boundaries, retention,
+        latency requirements and the consequences of ingestion spikes. Choose a new dependency only
+        when it solves an actual requirement that the current system does not meet adequately.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>PostgreSQL is a capable search option; Elasticsearch adds capabilities and operational responsibilities.</li>
+        <li>Choose from workload, required features and measured limits.</li>
+        <li>An existing logging stack is useful experience, not proof that sharing it is appropriate.</li>
+      </ul></div>
+
+      <h2>Designing and evaluating the search API</h2>
+      <p>
+        The backend should own the public search contract and translate it into safe engine queries.
+        Clients should not need to know the internal index name, raw query language or cluster credentials.
+      </p>
+      <ol>
+        <li><strong>Validate inputs:</strong> bound query length, result limits, filters and allowed sort options; define empty-input behavior.</li>
+        <li><strong>Apply trusted scope:</strong> constrain results to the user's tenant and permissions rather than accepting arbitrary client-supplied scope.</li>
+        <li><strong>Limit work:</strong> use timeouts, bounded pagination and rate limits, especially for fuzzy or wildcard searches.</li>
+        <li><strong>Return a stable contract:</strong> expose only public fields and define result ordering, total-count accuracy and cursor behavior.</li>
+        <li><strong>Handle failures honestly:</strong> distinguish no matches from timeouts, incomplete searches and indexing failures.</li>
+        <li><strong>Render safely:</strong> escape document text and control any highlighting markup; search results can contain untrusted content.</li>
+      </ol>
+      <p>
+        Authorization applies to counts, snippets, suggestions and aggregations as well as full
+        documents. Filtering only after fetching a page can leak information and distort pagination.
+        Build eligible scope into the query and account for stale permissions when the index is derived.
+        See <a href="04-auth.html">Authorization</a> and <a href="07-api-design.html">API Design</a>.
+      </p>
+      <h3>Fast is not enough</h3>
+      <p>
+        Keep a small evaluation set of real queries with expected useful results: exact names, broad
+        categories, phrases, typos, identifiers, different languages and no-match cases. Check whether
+        relevant items appear near the top, how often useful items are missed and whether irrelevant
+        suggestions appear. Review latency, error rate and zero-result rate alongside relevance.
+      </p>
+      <p>
+        Change analyzers, boosts, synonym rules or fuzziness against that evaluation set. More matching
+        results are not automatically better. The useful backend skill is understanding the contract,
+        choosing an appropriate index and measuring both retrieval quality and cost.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Keep credentials, query construction, limits and authorization on the backend.</li>
+        <li>Protect metadata and suggestions as carefully as full search results.</li>
+        <li>Evaluate relevance and latency together using a representative query set.</li>
+      </ul></div>
+    </div>
+
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; a study guide for curious engineers.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+
+</div>
+
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</dialog>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>

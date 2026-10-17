@@ -88,6 +88,22 @@
       blurb: 'Move slow work outside the request lifecycle and make queued tasks reliable.',
       outcomes: ['Trace a task from producer and broker to worker and acknowledgement.', 'Design durable handoff, safe retries, idempotency and scheduling.', 'Scale and monitor one-off, recurring, chained and batch workflows.'],
       tags: ['background jobs', 'background tasks', 'task queues', 'producer', 'consumer', 'worker', 'broker', 'enqueue', 'acknowledgement', 'visibility timeout', 'at-least-once', 'retries', 'exponential backoff', 'jitter', 'dead-letter queue', 'DLQ', 'idempotency', 'transactional outbox', 'cron', 'scheduling', 'batch', 'chains', 'push notifications', 'Celery', 'BullMQ', 'Asynq', 'RabbitMQ', 'Redis', 'SQS', 'monitoring']
+    },
+    {
+      num: '11',
+      slug: '11-full-text-search',
+      title: 'Full-Text Search',
+      blurb: 'Find relevant results with inverted indexes, PostgreSQL full-text search and Elasticsearch.',
+      outcomes: ['Explain analysis, inverted indexes, relevance scoring and typo tolerance.', 'Compare PostgreSQL text search and trigram indexes with Elasticsearch mappings and queries.', 'Design safe search APIs, reliable indexing and meaningful performance comparisons.'],
+      tags: ['full-text search', 'Elasticsearch', 'Lucene', 'inverted index', 'BM25', 'relevance', 'analyzers', 'tokenization', 'stemming', 'field boosting', 'fuzzy search', 'typo tolerance', 'autocomplete', 'typeahead', 'PostgreSQL', 'ILIKE', 'tsvector', 'tsquery', 'GIN', 'pg_trgm', 'trigrams', 'Query DSL', 'text', 'keyword', 'ELK', 'Logstash', 'Kibana', 'bulk indexing', 'benchmarks']
+    },
+    {
+      num: '12',
+      slug: '12-error-handling',
+      title: 'Error Handling & Fault Tolerance',
+      blurb: 'Detect failures, contain their impact and recover safely without exposing sensitive data.',
+      outcomes: ['Recognize logic, database, dependency, validation and configuration failures.', 'Choose health checks, bounded retries, containment and recovery strategies.', 'Propagate errors into consistent HTTP responses and safe diagnostic logs.'],
+      tags: ['error handling', 'fault tolerance', 'logic errors', 'invariants', 'database errors', 'connection pools', 'constraints', 'deadlocks', 'external services', 'timeouts', 'validation', 'configuration', 'health checks', 'liveness', 'readiness', 'startup', 'monitoring', 'observability', 'retries', 'exponential backoff', 'jitter', 'idempotency', 'circuit breaker', 'bulkheads', 'backpressure', 'graceful degradation', 'recovery', 'runbooks', 'backups', 'RPO', 'RTO', 'error propagation', 'global error handler', 'middleware', 'HTTP status codes', 'correlation ID', 'account enumeration', 'OWASP', 'logging', 'redaction']
     }
   ];
 

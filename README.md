@@ -18,6 +18,8 @@ The site itself has no framework, dependencies or build step.
 | 08 | [Databases & PostgreSQL](sections/08-databases.html) | Persistence, DBMS responsibilities, concurrency, relational vs document models, data types, constraints, relationships, migrations, seeding, safe queries, pagination, indexes & triggers |
 | 09 | [Caching](sections/09-caching.html) | Hits & misses, memory hierarchy, CDN & DNS caches, Redis, Valkey, Memcached, cache-aside, write-through, keys, TTLs, invalidation, eviction, sessions, rate limiting, stampedes & measurement |
 | 10 | [Background Jobs](sections/10-background-jobs.html) | Producers, brokers & workers, job payloads, durable handoff, acknowledgements, visibility timeouts, retries, idempotency, scheduling, chains, batches, async API contracts, scaling & monitoring |
+| 11 | [Full-Text Search](sections/11-full-text-search.html) | Inverted indexes, analyzers, BM25, field boosting, typos, autocomplete, PostgreSQL full-text search & trigrams, Elasticsearch mappings & Query DSL, synchronization, bulk ingestion, fair benchmarks & safe search APIs |
+| 12 | [Error Handling & Fault Tolerance](sections/12-error-handling.html) | Failure types, invariants, database constraints, validation, configuration, health checks, observability, bounded retries, containment, recovery, error propagation, global handlers, HTTP responses, account enumeration & safe logs |
 
 ## Running it
 
@@ -58,8 +60,8 @@ Opening `index.html` directly from the filesystem also works.
 
    ```js
    {
-     num: '11',
-     slug: '11-your-topic',
+     num: '13',
+     slug: '13-your-topic',
      title: 'Your Next Topic',
      blurb: 'One sentence for the home page card.',
      outcomes: ['First learning goal.', 'Second learning goal.', 'Third learning goal.'],
@@ -103,7 +105,9 @@ navigation, 200% text/zoom and printing.
 │   ├── 07-api-design.html
 │   ├── 08-databases.html
 │   ├── 09-caching.html
-│   └── 10-background-jobs.html
+│   ├── 10-background-jobs.html
+│   ├── 11-full-text-search.html
+│   └── 12-error-handling.html
 ├── tests/revision.test.js          revision behavior and content coverage
 └── assets/
     ├── css/main.css                the whole design system
