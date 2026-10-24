@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configuration Management &middot; Backend Principles</title>
+<meta name="description" content="Backend configuration management: settings, environment variables, config files, secret stores, precedence, startup validation, environments, feature flags, runtime updates and secret rotation.">
+<script>
+  (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try {
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell">
+
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 13</p>
+      <h1>Configuration Management</h1>
+      <p class="lead">
+        Configuration controls how the same application connects, behaves and uses resources in
+        different environments. Organize <strong>settings, secrets and feature controls</strong>
+        so that changes are deliberate, validated and easy to trace.
+      </p>
+    </header>
+
+    <div class="prose">
+      <h2>Configuration is application behavior</h2>
+      <p>
+        Configuration management is the process of organizing, storing, delivering, validating and
+        maintaining application settings. Database passwords and API keys are only one part of it.
+        Ports, timeouts, logging levels, session lifetimes and feature flags also change what the
+        backend does without requiring a different implementation of its business logic.
+      </p>
+      <p>
+        Consider an e-commerce backend. Its configuration identifies the database, selects a payment
+        provider's test or live environment, limits database connections and controls access to a new
+        checkout flow. The same code can behave very differently when any of those values change.
+        A non-secret setting can be just as consequential as a secret: a wrong payment endpoint or
+        an excessive order limit can still cause serious problems.
+      </p>
+      <div class="callout callout--key">
+        <p class="callout-label">A configuration change is a behavior change</p>
+        <p>
+          Moving a value out of source code does not make changing it harmless. Give important
+          settings clear ownership, validation, change history and a recovery plan.
+        </p>
+      </div>
+      <p>
+        Scattered constants, undocumented overrides and different settings on different instances
+        make incidents difficult to reproduce. A systematic configuration path lets you answer:
+        which values took effect, where did they come from, and which version was this instance using?
+        Centralizing that policy does not require storing every setting in a single physical service.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Configuration includes operational behavior and business controls as well as secrets.</li>
+        <li>Non-secret settings can still affect security, correctness and availability.</li>
+        <li>Make effective values, their sources and their change history understandable.</li>
+      </ul></div>
+
+      <h2>Types and characteristics of configuration</h2>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Category</th><th>Typical settings</th><th>What they control</th></tr></thead>
+        <tbody>
+          <tr><td>Application settings</td><td>Listening port, log level, request limits, timeouts.</td><td>How the server starts and handles work.</td></tr>
+          <tr><td>Database connections</td><td>Host, port, database name, credentials, TLS and pool settings.</td><td>Where data lives and how the application accesses it.</td></tr>
+          <tr><td>External services</td><td>API endpoints, credentials, retry limits and callback URLs.</td><td>Integration with email, payments, identity and other providers.</td></tr>
+          <tr><td>Feature flags</td><td>Checkout version, rollout percentage, eligible cohorts.</td><td>Which implemented behavior is enabled for which users.</td></tr>
+          <tr><td>Security settings</td><td>Signing keys, allowed origins, session expiry and authentication policies.</td><td>Identity, trust and access-related behavior.</td></tr>
+          <tr><td>Performance and observability</td><td>Worker concurrency, cache limits, metrics destinations, trace sampling.</td><td>Resource use and diagnostic visibility.</td></tr>
+          <tr><td>Infrastructure</td><td>Replica counts, resource limits, network and deployment settings.</td><td>The environment in which application processes run.</td></tr>
+          <tr><td>Business rules</td><td>Order limits, eligibility thresholds, supported regions.</td><td>Product policy that is intentionally adjustable.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Classify each setting along several dimensions: <strong>sensitivity</strong>, environment or
+        tenant scope, change frequency, owner and whether it can change while the process runs.
+        A port usually belongs to startup configuration; a rollout flag may change frequently;
+        a signing key is sensitive and needs a coordinated rotation process.
+      </p>
+      <p>
+        Record a setting's type, unit, allowed values, default and purpose. A name such as
+        <code>requestTimeoutMs</code> is less ambiguous than <code>timeout</code>. Distinguish optional
+        values from mandatory ones, and identify combinations that must remain consistent.
+      </p>
+      <p>
+        Not every database value is application configuration. Individual orders are business data.
+        A customer-editable pricing rule may need an audited domain model rather than a deployment
+        environment variable. Keep adjustable policy separate from the code that enforces the policy.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Identify application, connection, feature, security, infrastructure and business settings.</li>
+        <li>Document sensitivity, scope, ownership, type, units and update behavior for important values.</li>
+        <li>Choose a domain model for business data instead of turning every value into an environment variable.</li>
+      </ul></div>
+
+      <h2>Choose storage by responsibility</h2>
+      <p>
+        Storage choices depend on who changes a value, who may read it, how often it changes and
+        how the application receives updates. The source of truth and the delivery mechanism can
+        differ: a secret manager may own a credential while a deployment injects it into a process.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Source</th><th>Useful role</th><th>Important limit</th></tr></thead>
+        <tbody>
+          <tr><td>Environment variables</td><td>Supply deployment-specific values to a process.</td><td>Values need parsing; changing deployment settings does not automatically update running processes.</td></tr>
+          <tr><td>Configuration files</td><td>Group structured settings and version non-secret defaults.</td><td>Files need explicit loading, validation and appropriate permissions.</td></tr>
+          <tr><td>Key-value configuration stores</td><td>Share settings across instances and support controlled updates.</td><td>Access control, availability and update consistency still need design.</td></tr>
+          <tr><td>Secret managers</td><td>Control access to sensitive values and manage their lifecycle.</td><td>The application still needs an identity, retrieval policy and safe handling after delivery.</td></tr>
+          <tr><td>Feature-management services</td><td>Evaluate flags and targeting rules.</td><td>Define evaluation context, safe defaults and provider-failure behavior.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        A common hybrid keeps ordinary defaults in version control, deployment overrides in the
+        environment and sensitive credentials in a secret manager. Use the systems already provided
+        by your platform when they meet the requirements. Adding several new services merely to
+        load a handful of settings also adds operational failure points.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Separate where a value is managed from how it reaches the application.</li>
+        <li>Choose storage based on sensitivity, access patterns and update needs.</li>
+        <li>Hybrid storage is normal; keep its loading and ownership rules simple.</li>
+      </ul></div>
+
+      <h2>Environment variables and dotenv files</h2>
+      <p>
+        Environment variables belong to a process's environment and are normally supplied when that
+        process starts. A shell, service manager or deployment platform can provide them. A dotenv
+        loader reads a file and populates the application process's environment; it does not update
+        the parent shell or create global operating-system settings for every program.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Illustrative local settings — no credentials</div>
+        <pre><code>APP_ENV=development
+PORT=8080
+LOG_LEVEL=debug
+DB_POOL_MAX=10
+REQUEST_TIMEOUT_MS=10000
+CHECKOUT_V2_ENABLED=false</code></pre>
+      </div>
+      <p>
+        Node.js exposes environment values through <code>process.env</code>. Values loaded from a
+        dotenv file remain strings: <code>"10"</code> is not yet a number, and <code>"false"</code>
+        is not a Boolean. An absent key is different from an empty value. Parse these deliberately;
+        testing the truthiness of a nonempty <code>"false"</code> string would incorrectly enable a feature.
+        See <a href="https://nodejs.org/api/environment_variables.html">Node.js environment-variable documentation</a>.
+      </p>
+      <p>
+        Use the loader supported by your runtime or project, and document whether existing process
+        values override file values. Dotenv syntax and override behavior vary by implementation.
+        A filename such as <code>.env.production</code> is not automatically loaded unless your setup
+        explicitly supports that convention.
+      </p>
+      <p>
+        Commit a safe example file documenting required names and non-secret defaults. Keep real
+        credentials out of version control, images and logs. An environment variable is a delivery
+        mechanism, not an encrypted vault; code with access to the process can still read it.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Dotenv loads values into the application process, not the entire operating system.</li>
+        <li>Parse strings explicitly and distinguish missing values, empty values and valid false or zero values.</li>
+        <li>Document loading precedence and keep real secrets out of committed example files.</li>
+      </ul></div>
+
+      <h2>Configuration files</h2>
+      <p>
+        Files are useful when related settings form a hierarchy. A server section can hold its port
+        and timeout, while database and logging sections carry their own settings. Non-secret files
+        also let changes pass through ordinary review and version-control history.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Format</th><th>Useful properties</th><th>Things to account for</th></tr></thead>
+        <tbody>
+          <tr><td>JSON</td><td>Common tooling and explicit objects, arrays, numbers and Booleans.</td><td>Standard JSON has no comments; document settings separately or through the schema.</td></tr>
+          <tr><td>YAML</td><td>Readable nested structures and comments.</td><td>Indentation and scalar interpretation matter; use a safe parser mode and validate types.</td></tr>
+          <tr><td>TOML</td><td>Tables, explicit value types and comments.</td><td>Use a supported parser and keep the same application-level validation rules.</td></tr>
+        </tbody>
+      </table></div>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Example non-secret configuration document</div>
+        <pre><code>{
+  "server": { "port": 8080, "requestTimeoutMs": 10000 },
+  "logging": { "level": "info" },
+  "database": { "poolMax": 10 },
+  "features": { "checkoutV2Enabled": false }
+}</code></pre>
+      </div>
+      <p>
+        These are illustrative values, not universal production defaults. Parsing confirms the
+        document's syntax; it does not prove that the port is acceptable, that the pool fits the
+        database budget or that the configuration is complete. Files containing secret references
+        also need a defined resolver: writing an environment-variable name into JSON does not
+        interpolate it automatically.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>JSON, YAML and TOML organize settings differently but all require schema validation.</li>
+        <li>Version ordinary defaults and document each setting's purpose and units.</li>
+        <li>Secret references and variable substitution need explicit loader behavior.</li>
+      </ul></div>
+
+      <h2>Remote stores and secret delivery</h2>
+      <p>
+        A remote configuration store gives multiple instances a shared place to retrieve values.
+        Systems such as Consul and etcd provide key-value storage, but operating them safely still
+        requires authentication, access controls, backups and availability planning. A general
+        key-value store is not automatically a complete secrets-management system.
+        See <a href="https://developer.hashicorp.com/consul/docs/automate/kv">Consul's KV overview</a>.
+      </p>
+      <p>
+        Secret-management options include HashiCorp Vault, AWS Secrets Manager, Azure Key Vault and
+        Google Cloud Secret Manager. Their integrations and operating models differ. Choose based
+        on the existing platform and required lifecycle controls rather than assuming every backend
+        needs to operate a separate vault cluster.
+        <a href="https://developer.hashicorp.com/vault/docs/about-vault/what-is-vault">Vault's overview</a>
+        describes its role in controlling access to sensitive values.
+      </p>
+      <h3>Understand the storage and retrieval contract</h3>
+      <p>
+        AWS Parameter Store supports ordinary String and StringList parameters as well as
+        <code>SecureString</code> values protected with AWS KMS. Do not assume every parameter gets
+        the same encryption treatment. AWS Secrets Manager adds purpose-built secret lifecycle
+        features, including supported rotation workflows.
+        See <a href="https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-parameter-store.html">the Parameter Store documentation</a>.
+      </p>
+      <div class="callout callout--key">
+        <p class="callout-label">Encrypted storage does not mean unusable ciphertext in the app</p>
+        <p>
+          Managed services commonly decrypt authorized reads on the service side and deliver the
+          usable secret over TLS. For example, AWS Secrets Manager returns a decrypted SecretString.
+          Applications do not generally need their own private key to decrypt each retrieved value.
+          The secret still needs protection in application memory and logs.
+          See <a href="https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html">GetSecretValue</a>.
+        </p>
+      </div>
+      <p>
+        Delivery may happen through the application, a deployment agent or a mounted file. Use a
+        narrowly scoped workload identity where supported to authenticate retrieval. Moving secrets
+        into a remote store should not require hardcoding a new, broadly privileged access token in source code.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Shared configuration storage and secret lifecycle management have different responsibilities.</li>
+        <li>Verify the chosen parameter type, encryption, access controls and rotation support.</li>
+        <li>Authorized retrieval usually gives the application usable secrets; keep that delivery and use secure.</li>
+      </ul></div>
+
+      <h2>Precedence and one effective configuration</h2>
+      <p>
+        Hybrid storage needs an explicit precedence policy. Otherwise a setting may be present in
+        three places while nobody knows which one the process uses. Define the policy per deployment
+        and make the mapping from external names to application fields predictable.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>One possible policy for ordinary application settings</div>
+        <pre><code>Lowest priority: application defaults
+                 environment-specific configuration file
+                 process environment overrides
+Highest priority: approved remote configuration overrides</code></pre>
+      </div>
+      <p>
+        This is an example policy, not an industry standard. If a file sets the pool maximum to 10,
+        the environment sets it to 20 and an approved remote override sets it to 30, this policy
+        selects 30. Map the inputs to the same logical field, resolve the winner and validate the
+        effective configuration. Document whether nested objects merge and whether arrays replace
+        earlier arrays; avoid surprising partial replacements.
+      </p>
+      <p>
+        Keep protected secrets on their intended source path instead of allowing any ordinary
+        override to replace them. A missing mandatory remote value must not silently fall back to
+        development credentials. An explicitly supplied invalid value should fail validation, not
+        disappear behind a default. Defaults apply to the absence conditions you deliberately support.
+      </p>
+      <p>
+        Produce one application-facing configuration object instead of reading raw environment
+        values separately in every handler. Record safe provenance such as source names and version
+        identifiers so operators can investigate overrides without dumping secret values.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Define precedence, field mappings and merge behavior before combining configuration sources.</li>
+        <li>Reject invalid overrides and missing mandatory secrets instead of hiding them with unsafe fallbacks.</li>
+        <li>Expose one validated configuration view and retain safe information about its sources.</li>
+      </ul></div>
+
+      <h2>Validate configuration before startup</h2>
+      <p>
+        Treat configuration as external input. It can be missing, mistyped or incompatible even
+        when it came from a trusted deployment system. Validate the effective values before opening
+        the application to traffic, as introduced in <a href="12-error-handling.html">Error Handling &amp; Fault Tolerance</a>.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Check</th><th>Example</th></tr></thead>
+        <tbody>
+          <tr><td>Presence</td><td>A mandatory database endpoint must exist; an empty value is not a usable endpoint.</td></tr>
+          <tr><td>Type and parsing</td><td>Parse a Boolean explicitly and require a complete valid integer for a numeric field.</td></tr>
+          <tr><td>Range and allowed values</td><td>A listening port fits the application's allowed range; a log level belongs to its supported set.</td></tr>
+          <tr><td>Units</td><td>Distinguish milliseconds from seconds and byte limits from item counts.</td></tr>
+          <tr><td>Cross-field rules</td><td>Minimum pool size does not exceed maximum; an enabled integration has its required settings.</td></tr>
+          <tr><td>Environment rules</td><td>Production uses approved endpoints and required transport-security settings.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Use the project's validation facilities or a suitable schema library, such as <a href="https://zod.dev/basics">Zod</a> in a
+        TypeScript application or <a href="https://pkg.go.dev/github.com/go-playground/validator/v10">go-playground/validator</a> in Go. Static types alone cannot validate
+        values supplied after compilation. Whichever tool you use, keep the schema and defaults near
+        the configuration-loading boundary so business code receives predictable values.
+      </p>
+      <p>
+        Catch misspelled keys in owned configuration documents. When reading the process environment,
+        validate the application's declared settings rather than rejecting every unrelated variable
+        inherited from the operating system. Give errors that name the problematic setting and rule,
+        without including a credential or full connection string.
+      </p>
+      <p>
+        Check missing mandatory values, valid defaults, invalid ranges, malformed numbers, false
+        Booleans, units and conflicting sources. Also distinguish validation from connectivity:
+        a correctly shaped API key may still be expired, and a valid database address may be unreachable.
+        Initializing required clients and continued runtime error handling remain necessary.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Validate required values, types, ranges, units and related-field rules before serving traffic.</li>
+        <li>Use safe diagnostics and test defaults, invalid overrides and environment-specific rules.</li>
+        <li>Configuration validity does not guarantee that its dependencies are available or credentials remain valid.</li>
+      </ul></div>
+
+      <h2>Development, test, staging and production</h2>
+      <p>
+        Environments have different priorities. Keep the application implementation consistent while
+        supplying the settings and resources appropriate to each environment. A setting can change
+        behavior already supported by the code; entirely new behavior still requires an implementation.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Environment</th><th>Primary purpose</th><th>Configuration implications</th></tr></thead>
+        <tbody>
+          <tr><td>Development</td><td>Fast iteration and debugging.</td><td>Local or isolated services, useful diagnostic logging and development credentials.</td></tr>
+          <tr><td>Test</td><td>Repeatable automated checks.</td><td>Isolated data, controlled inputs and safe substitutes or sandboxes for external side effects.</td></tr>
+          <tr><td>Staging</td><td>Exercise deployment and production-like behavior.</td><td>Compatible dependencies and security paths with separate credentials and test data.</td></tr>
+          <tr><td>Production</td><td>Serve real users reliably and securely.</td><td>Real service endpoints, deliberate capacity limits, monitored behavior and restricted access.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Staging can use less capacity than production to control cost, but record that difference.
+        Tests on a tiny staging database cannot establish how production behaves under peak load.
+        Preserve the features and dependency versions needed to test compatibility, and use suitable
+        capacity when the purpose is performance testing.
+      </p>
+      <p>
+        Separate credentials and access boundaries so test jobs cannot accidentally send real customer
+        emails or write to the production database. Names such as “staging” help humans, but they
+        are not security controls by themselves. Configuration changes should be attributable even
+        when the application binary has not changed.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use environment-specific configuration to support development, testing and production priorities.</li>
+        <li>Isolate credentials, resources and side effects between environments.</li>
+        <li>Document staging differences; reduced capacity limits what its tests can demonstrate.</li>
+      </ul></div>
+
+      <h2>Tune resources and timeouts together</h2>
+      <p>
+        A larger production connection pool is not automatically better. Pool size must fit database
+        capacity, query duration, traffic and the number of application replicas. Twenty replicas
+        with a maximum of 50 connections each can request up to 1,000 connections, before accounting
+        for workers, migrations or administrative access. Autoscaling changes that combined budget.
+      </p>
+      <p>
+        Values such as development 10, staging 2 and production 50 are illustrations, not recommended
+        defaults. A smaller pool may reduce pressure, but does not necessarily reduce the bill of a
+        fixed-price database instance. Choose limits using measurements and the actual hosting model.
+        Worker concurrency, runtime parallelism and cache limits need the same capacity reasoning.
+      </p>
+      <h3>A timeout belongs to a particular layer</h3>
+      <p>
+        Client deadlines, proxy timeouts, application deadlines, database pool acquisition and query
+        execution all measure different things. If an image-generation operation takes 80 seconds
+        but an outer layer waits only 60, the caller may give up before work completes. A gateway
+        may return 504 when its upstream times out; another component may close the connection or
+        produce a different error. A configured timeout does not universally imply a 504 response.
+      </p>
+      <p>
+        Budget inner work within the overall deadline and propagate cancellation where supported.
+        Use <a href="10-background-jobs.html">background jobs</a> for appropriate long-running work
+        rather than extending every timeout indefinitely. Define separate security lifetimes too:
+        session idle timeout and absolute expiry are different rules, with values chosen for the
+        application's security and usability requirements.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Budget connections and concurrency across every replica and worker.</li>
+        <li>Tune from measured needs; a larger pool or smaller number does not guarantee better performance or lower cost.</li>
+        <li>Give timeouts clear scope and units, and coordinate them across the request path.</li>
+      </ul></div>
+
+      <h2>Feature flags and controlled rollout</h2>
+      <p>
+        A feature flag selects between behavior that already exists in the application. Deploy a
+        new checkout implementation with its flag disabled, then enable it for a small group before
+        broadening access. Separating deployment from exposure makes it possible to observe a change
+        and disable the new path without immediately deploying different code.
+      </p>
+      <p>
+        Targeting can use an eligible account, a region, a plan or a rollout cohort. Supply only the
+        evaluation context needed for the decision and use trustworthy server-side attributes for
+        consequential rules. OpenFeature describes a targeting key and custom context fields in its
+        <a href="https://openfeature.dev/specification/sections/evaluation-context/">evaluation-context specification</a>.
+      </p>
+      <p>
+        Keep assignment stable when a user should remain in the same experiment. A random decision
+        on every request can switch checkout behavior halfway through a purchase. Record the chosen
+        variant with the workflow when necessary, and measure outcomes before increasing exposure.
+        A percentage rollout by itself is not a complete A/B experiment: define assignment, metrics
+        and how results will be evaluated.
+      </p>
+      <div class="callout callout--warn">
+        <p class="callout-label">Flags do not replace authorization</p>
+        <p>
+          Hiding a button or disabling a frontend feature is not permission enforcement. The backend
+          must still authorize the operation. A feature's safe fallback also depends on its purpose;
+          “enabled” is not a safe universal response to a failed flag lookup.
+        </p>
+      </div>
+      <p>
+        Give flags an owner, a default, a provider-failure policy and a removal plan. Exercise both
+        paths while they exist. Turning off a flag does not undo data already written by the new
+        behavior, so keep rollback and schema compatibility in the rollout plan.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Feature flags separate deploying code from exposing its behavior.</li>
+        <li>Use deliberate targeting, stable assignment and outcome measurements for controlled rollout.</li>
+        <li>Retain authorization checks and define flag defaults, ownership, rollback limits and cleanup.</li>
+      </ul></div>
+
+      <h2>Runtime changes in distributed systems</h2>
+      <p>
+        Some settings are read once at startup; others are refreshed through polling, watches or
+        a provider SDK. Define which model each setting uses. Updating a remote value does not
+        automatically reconfigure an existing database client, listener or worker pool.
+      </p>
+      <p>
+        Kubernetes illustrates the distinction: ConfigMap values injected as environment variables
+        require a restart to change in the process. Normally projected ConfigMap files are updated
+        eventually, but the application must notice and apply the change; subPath mounts are an
+        exception to automatic file updates. ConfigMaps are intended for non-confidential data.
+        See <a href="https://kubernetes.io/docs/concepts/configuration/configmap/">the ConfigMap documentation</a>.
+      </p>
+      <h3>Validate a candidate before making it active</h3>
+      <p>
+        For settings designed to reload, construct and validate a complete candidate configuration,
+        then switch the active view together. Avoid exposing a half-updated combination of related
+        values. Initialize replacement clients safely and retire old ones deliberately. For settings
+        that are difficult to reload correctly, a controlled restart may be simpler.
+      </p>
+      <p>
+        Multiple instances may observe a change at different times. Use version identifiers to
+        detect drift and design compatibility across a rollout. If an operation requires a consistent
+        set of settings, keep one version for that operation or use a stronger coordination mechanism
+        appropriate to its rules. A centralized source does not guarantee simultaneous adoption.
+      </p>
+      <h3>Plan for an unavailable configuration service</h3>
+      <p>
+        Bound fetch times and retries. A new instance with missing mandatory settings should not
+        start serving requests. An existing instance may retain its last validated configuration
+        under an explicit staleness policy. That policy cannot make expired credentials valid or
+        override a required security revocation. Monitor refresh failures and configuration age.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Declare whether a setting requires restart or supports an implemented refresh path.</li>
+        <li>Validate complete updates, track versions and account for instances adopting changes at different times.</li>
+        <li>Define fetch budgets and safe staleness behavior without bypassing expiry or revocation.</li>
+      </ul></div>
+
+      <h2>Secret access, exposure and rotation</h2>
+      <p>
+        Keep real secrets out of source code, committed configuration, container images, frontend
+        bundles and logs. Anything sent to a browser must be treated as public, even if it began as
+        a server environment variable. Use only credentials explicitly designed for public clients there.
+      </p>
+      <p>
+        Apply least privilege to people, workloads and deployment jobs: grant access to the specific
+        secret and environment needed for the task. Job titles alone are too broad; a backend developer
+        does not automatically need every production credential. Separate read, update and administrative
+        rights, and audit access. These practices are covered in the
+        <a href="https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html">OWASP Secrets Management Cheat Sheet</a>.
+      </p>
+      <p>
+        Plan rotation and revocation. Introduce a replacement, verify consumers can use it, then
+        retire the old credential according to policy. Coordinate signing-key changes with token
+        verification and expiry; an emergency revocation may intentionally invalidate sessions.
+        If a secret leaks, revoke or rotate it promptly. Deleting it from the latest commit does
+        not invalidate copies in repository history or elsewhere.
+      </p>
+      <p>
+        Rotation applies to credentials and keys; ordinary settings such as ports need change control,
+        not arbitrary periodic replacement. Test the rotation process as well as initial secret loading.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Keep secrets out of public artifacts and grant narrowly scoped access.</li>
+        <li>Coordinate replacement, verification and revocation across consumers.</li>
+        <li>Respond to exposure by invalidating the secret, not merely deleting one visible copy.</li>
+      </ul></div>
+
+      <h2>A predictable configuration workflow</h2>
+      <p>
+        A useful configuration pipeline makes the transition from raw settings to a running service
+        explicit. It can be a small startup module using the project's existing facilities; it does
+        not need a new framework or a remote service for every category of setting.
+      </p>
+      <ol>
+        <li><strong>Identify the deployment.</strong> Establish its environment, configuration locations and workload identity without embedding privileged bootstrap credentials.</li>
+        <li><strong>Load the declared sources.</strong> Read defaults and files, obtain deployment overrides and retrieve required remote values within a bounded startup budget.</li>
+        <li><strong>Resolve and validate.</strong> Apply documented precedence, parse types and check required values, ranges, units and cross-field rules.</li>
+        <li><strong>Initialize dependent components.</strong> Give clients and services the validated settings they need, keeping sensitive values away from unrelated modules.</li>
+        <li><strong>Become ready.</strong> Record safe configuration version information and accept traffic only when required initialization succeeds.</li>
+        <li><strong>Manage changes.</strong> Review and validate updates, roll them out deliberately, observe outcomes and use the documented rollback or rotation procedure.</li>
+      </ol>
+      <p>
+        For an e-commerce service, review whether payment mode matches the environment, the database
+        and worker pools fit the combined budget, the checkout flag has a known fallback and the
+        configuration is complete before the service becomes ready. Those checks connect deployment
+        settings to actual user-facing consequences.
+      </p>
+      <p>
+        Keep a small configuration reference with each setting's name, purpose, owner, type, unit,
+        default, sensitivity and restart or reload requirement. Use source and version information
+        for troubleshooting instead of printing every value. This makes configuration understandable
+        both during routine development and when someone must diagnose an incident quickly.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Load, resolve, parse and validate before initializing the application and accepting traffic.</li>
+        <li>Make behavior changes reviewable, observable and recoverable.</li>
+        <li>Document the configuration contract so developers and operators can reason about the effective settings.</li>
+      </ul></div>
+    </div>
+
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; a study guide for curious engineers.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+
+</div>
+
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</dialog>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>

@@ -20,6 +20,10 @@ The site itself has no framework, dependencies or build step.
 | 10 | [Background Jobs](sections/10-background-jobs.html) | Producers, brokers & workers, job payloads, durable handoff, acknowledgements, visibility timeouts, retries, idempotency, scheduling, chains, batches, async API contracts, scaling & monitoring |
 | 11 | [Full-Text Search](sections/11-full-text-search.html) | Inverted indexes, analyzers, BM25, field boosting, typos, autocomplete, PostgreSQL full-text search & trigrams, Elasticsearch mappings & Query DSL, synchronization, bulk ingestion, fair benchmarks & safe search APIs |
 | 12 | [Error Handling & Fault Tolerance](sections/12-error-handling.html) | Failure types, invariants, database constraints, validation, configuration, health checks, observability, bounded retries, containment, recovery, error propagation, global handlers, HTTP responses, account enumeration & safe logs |
+| 13 | [Configuration Management](sections/13-configuration.html) | Settings, environment variables, dotenv, JSON/YAML/TOML files, remote stores, secrets, precedence, startup validation, environment differences, capacity tuning, feature flags, runtime updates, least privilege & rotation |
+| 14 | [Logging, Monitoring & Observability](sections/14-observability.html) | Structured logs, severity, metrics, cardinality, traces, spans, context propagation, OpenTelemetry, to-do instrumentation, collection tools, dashboards, alerts, sampling, retention & safe telemetry |
+| 15 | [Graceful Shutdown](sections/15-graceful-shutdown.html) | Process life cycles, signals, request draining, readiness, deployment coordination, deadlines, transactions, workers, long-lived connections, dependency cleanup, Go shutdown helpers & verification |
+| 16 | [Backend Security](sections/16-security.html) | Trust boundaries, SQL/NoSQL/command injection, password hashing, sessions, cookies, JWTs, revocation, rate limiting, BOLA, BFLA, tenant isolation, XSS, CSP, CSRF, CORS, secrets, headers & security testing |
 
 ## Running it
 
@@ -60,8 +64,8 @@ Opening `index.html` directly from the filesystem also works.
 
    ```js
    {
-     num: '13',
-     slug: '13-your-topic',
+     num: '17',
+     slug: '17-your-topic',
      title: 'Your Next Topic',
      blurb: 'One sentence for the home page card.',
      outcomes: ['First learning goal.', 'Second learning goal.', 'Third learning goal.'],
@@ -107,7 +111,11 @@ navigation, 200% text/zoom and printing.
 │   ├── 09-caching.html
 │   ├── 10-background-jobs.html
 │   ├── 11-full-text-search.html
-│   └── 12-error-handling.html
+│   ├── 12-error-handling.html
+│   ├── 13-configuration.html
+│   ├── 14-observability.html
+│   ├── 15-graceful-shutdown.html
+│   └── 16-security.html
 ├── tests/revision.test.js          revision behavior and content coverage
 └── assets/
     ├── css/main.css                the whole design system

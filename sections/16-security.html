@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backend Security &middot; Backend Principles</title>
+<meta name="description" content="Backend security: trust boundaries, SQL and NoSQL injection, command execution, password hashing, sessions, cookies, JWTs, authorization, XSS, CSRF, CORS, secrets and security testing.">
+<script>
+  (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try {
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell">
+
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 16</p>
+      <h1>Backend Security</h1>
+      <p class="lead">
+        Follow data across trust boundaries, challenge assumptions and enforce access deliberately.
+        Security comes from <strong>consistent safeguards throughout the system</strong>, supported by testing and maintenance.
+      </p>
+    </header>
+
+    <div class="prose">
+      <h2>Think in boundaries and assumptions</h2>
+      <p>
+        A backend receives input, queries databases, calls services and returns data to browsers.
+        Each interaction crosses a boundary with different rules. A browser field is not a trustworthy
+        identity, a valid login is not permission to read every record, and a string intended as data
+        can become executable syntax when inserted into another language.
+      </p>
+      <p>
+        An attacker can call an API directly, change identifiers, add fields the UI never sends and
+        repeat requests in unexpected orders. Frontend validation, hidden buttons and an obscure admin
+        URL do not restrict those requests. Instead of assuming the happy path, ask three questions:
+      </p>
+      <ol>
+        <li><strong>What boundary is this data crossing?</strong> A language, user, tenant, privilege level or service boundary?</li>
+        <li><strong>Which assumption makes this operation safe?</strong> Type, identity, ownership, freshness, size or allowed destination?</li>
+        <li><strong>Where is that assumption enforced?</strong> By the server, at every relevant point of use, with a safe failure path?</li>
+      </ol>
+      <p>
+        This lesson focuses on application security while recognizing its dependencies on browser,
+        network and operating-system controls. Validation, authorization, safe APIs, least privilege
+        and monitoring complement one another. No checklist or framework guarantees complete security,
+        and no fixed percentage describes how many vulnerabilities a mindset alone prevents.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Treat client input and client behavior as untrusted, even when your own frontend normally sends them.</li>
+        <li>Identify the boundary, the safety assumption and the server-side control enforcing it.</li>
+        <li>Combine safeguards and maintain them as the application changes.</li>
+      </ul></div>
+
+      <h2>SQL injection: keep syntax separate from values</h2>
+      <p>
+        Injection occurs when untrusted data changes the instructions interpreted by another system.
+        In SQL injection, string concatenation can let a supplied value change a query's structure.
+        Consider a user lookup where the developer inserts an email between quotes:
+      </p>
+      <div class="msg">
+        <div class="msg-head">Illustrative vulnerable query construction — do not use</div>
+        <pre><code>query = "SELECT id, email FROM users WHERE email = '" + email + "'"
+
+Ordinary input:
+  alice@example.test
+
+Result:
+  SELECT id, email FROM users WHERE email = 'alice@example.test'
+
+Input that changes the predicate:
+  ' OR '1'='1' --
+
+Result:
+  SELECT id, email FROM users WHERE email = '' OR '1'='1' --'</code></pre>
+      </div>
+      <p>
+        The supplied quote ends the string literal, the OR condition is always true, and the comment
+        removes the trailing quote from consideration. In this example the database returns every row.
+        What an attacker actually receives depends on the application's response handling and database
+        permissions. This lookup alone does not prove a login bypass: correct authentication must still
+        verify the password. It does demonstrate that user input has taken control of SQL syntax.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Parameterized lookup — PostgreSQL-style placeholders, API pseudocode</div>
+        <pre><code>statement = "SELECT id, email, password_hash FROM users WHERE email = $1"
+user = database.query(statement, [validatedEmail])
+
+verify the submitted password using the password-hashing library
+return only the application's allowed response fields</code></pre>
+      </div>
+      <p>
+        Bind values through the driver's parameter API. The value is handled as data, not reparsed as
+        SQL syntax; this is not equivalent to manually inserting escaped text. Placeholder syntax
+        varies by driver. Parameters usually cannot stand for table names, column names or sort
+        directions, so choose those from a server-controlled allowlist. ORMs also require care around
+        raw SQL escape hatches. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html">OWASP's SQL injection defenses</a>.
+      </p>
+      <p>
+        Validation remains useful, but banning apostrophes is not a SQL injection defense: legitimate
+        names contain them. A NOT NULL constraint also does not reject an empty string. Blocking
+        multiple SQL statements does not prevent attacks that change a single statement. Give the
+        application only required database privileges and use a separate migration role; losing
+        CREATE or DROP privileges limits damage but does not make unrestricted reads or deletes safe.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use bound parameters for values; choose dynamic SQL identifiers and directions from allowlists.</li>
+        <li>Validation, ORM use and multiple-statement restrictions do not replace safe query construction.</li>
+        <li>Limit database permissions and return only intended fields.</li>
+      </ul></div>
+
+      <h2>NoSQL injection and unexpected query structure</h2>
+      <p>
+        A document database can also interpret untrusted input as instructions. A MongoDB query field
+        may accept an operator object as well as a string. If an endpoint expects an email but accepts
+        arbitrary JSON, a value such as <code>{"$ne": null}</code> can change equality into an operator
+        expression when passed through to a query.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Build the filter yourself — conceptual validation flow</div>
+        <pre><code>accept a request containing only the documented fields
+require email to be a string with the expected format and bounded length
+reject arrays and objects where a scalar email is required
+construct the filter as { email: validatedEmail }
+execute the fixed filter through the database driver</code></pre>
+      </div>
+      <p>
+        Validate types and structure before constructing a query. Do not pass a request body directly
+        as a database filter or update document. Likewise, accepting every supplied property can let
+        users set server-owned fields such as roles or tenant ownership, a problem often called
+        <strong>mass assignment</strong>. Map explicitly allowed fields into the operation.
+      </p>
+      <p>
+        SQL and NoSQL both need these boundaries. A database category is neither a security guarantee
+        nor an inherent reason an application is insecure. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/NoSQL_Security_Cheat_Sheet.html">OWASP's NoSQL guidance</a>
+        and the earlier <a href="05-validation.html">validation lesson</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Validate scalar types before inserting values into document-database filters.</li>
+        <li>Keep operators, query structure and writable fields under server control.</li>
+        <li>NoSQL avoids SQL syntax, not injection or access-control risks.</li>
+      </ul></div>
+
+      <h2>Command injection and argument injection</h2>
+      <p>
+        A media-processing service might invoke FFmpeg after an upload. If it constructs a shell
+        command by concatenating an uploaded filename, shell punctuation in that filename can alter
+        the command. Pipes, command substitution and command separators have meaning to a shell;
+        the same characters are ordinarily just data in a filename argument passed directly to a process.
+      </p>
+      <p>
+        Prefer an application library when it removes the need to launch a command. Otherwise use a
+        fixed executable and an API that accepts an argument array without invoking a shell. Keep
+        executable selection and options under application control. See
+        <a href="https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html">OWASP's command injection defenses</a>.
+      </p>
+      <div class="callout callout--warn">
+        <div class="callout-label">No shell is only part of the boundary</div>
+        <p>
+          A program can still interpret a supplied argument as an option, path, URL or special input
+          format. Argument arrays prevent shell parsing; they do not make every argument harmless.
+          Validate the called tool's inputs, use an end-of-options delimiter where supported, and
+          generate storage paths rather than trusting uploaded filenames.
+        </p>
+      </div>
+      <p>
+        Restrict processing to owned directories and supported formats, limit file size, dimensions,
+        execution time and resources, and run with minimal privileges. Handling a file normally uses
+        filesystem APIs, not shell commands; do not introduce a shell merely to open, rename or delete it.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Prefer library APIs; otherwise invoke a fixed executable with arguments and no shell.</li>
+        <li>Validate argument meaning as well as separating arguments from command syntax.</li>
+        <li>Constrain paths, processing resources and operating-system privileges.</li>
+      </ul></div>
+
+      <h2>Authentication is a whole lifecycle</h2>
+      <p>
+        Authentication establishes who is making a request. Production authentication also includes
+        account creation, verification, recovery, session expiration, device management, multifactor
+        authentication and revocation. A login form and a token-signing function cover only part of that lifecycle.
+      </p>
+      <p>
+        A maintained authentication framework or provider can reduce implementation and maintenance
+        work. Choose based on requirements, operational ownership, integration, cost and migration
+        constraints. A provider does not automatically enforce your application's resource permissions
+        or make unsafe integration code secure. Avoid inventing cryptography or assuming generated
+        authentication code has already been security-reviewed.
+      </p>
+      <p>
+        Social sign-in commonly uses OpenID Connect on top of OAuth 2.0. OAuth is an authorization
+        framework; OpenID Connect defines an identity layer. Validate the configured issuer, audience,
+        protocol state and tokens through the provider's supported integration. Identify an external
+        identity using its trusted issuer and subject, not a client-supplied email alone.
+        See <a href="https://openid.net/specs/openid-connect-core-1_0.html">OpenID Connect Core</a>.
+      </p>
+      <p>
+        Account linking deserves special care: matching email text does not prove ownership of both
+        accounts. Use a deliberate linking flow that verifies control of the relevant identities.
+        Password reset and email-change flows must not provide easier account takeover paths than login.
+        Prefer generic credential-error messages that avoid revealing whether an account exists, and
+        add reauthentication or MFA for sensitive changes. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html">OWASP's authentication guidance</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Authentication includes recovery, linking, session management and revocation, not just login.</li>
+        <li>Use maintained components and still verify their integration and your own authorization.</li>
+        <li>Do not link identities solely because their email strings match.</li>
+      </ul></div>
+
+      <h2>Password hashes, salts and offline guessing</h2>
+      <p>
+        Store a password verifier, not the password itself. Plaintext storage exposes credentials to
+        anyone who obtains database access, including through backups or excessive internal privileges.
+        Password reuse can turn one application's breach into account takeover elsewhere.
+      </p>
+      <p>
+        A password-hashing function derives a value from a password, salt and cost parameters.
+        Verification tests a candidate against that stored value. There is no decryption step, but
+        <strong>one-way hashing does not stop guessing</strong>: an attacker can hash candidate
+        passwords and compare the results. A leaked hash is therefore still sensitive.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Protection</th><th>What it changes</th><th>What it does not solve</th></tr></thead>
+        <tbody>
+          <tr><td>Hashing</td><td>The database need not store recoverable plaintext passwords.</td><td>Attackers can still test guesses.</td></tr>
+          <tr><td>A fresh random salt for each password hash</td><td>Equal passwords normally produce different stored verifiers; reusable precomputed tables become ineffective.</td><td>The salt is not secret and does not prevent per-user guessing.</td></tr>
+          <tr><td>A suitable work factor</td><td>Each guess consumes more time and, for memory-hard algorithms, memory.</td><td>Weak passwords remain guessable; hardware and parallelism still matter.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Use a maintained password-hashing library's hash and verify APIs. These normally generate and
+        encode the salt with the algorithm, parameters and verifier. Do not manually concatenate a salt,
+        invent a storage scheme, or generate a new independent salt and compare two encoded hashes at
+        login. The verify API uses the parameters embedded in the stored record. This is why repeated
+        hashing of the same password can legitimately produce different encoded records.
+      </p>
+      <p>
+        A rainbow table is a particular precomputation technique, not simply a name for every password
+        dictionary. Salted password hashing blocks reuse of generic precomputed results; it does not
+        make recovery of a weak password impossible. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html">OWASP's password storage guidance</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Store salted password verifiers through a maintained password-hashing library.</li>
+        <li>Salts prevent reusable precomputation, while work factors make individual guesses more expensive.</li>
+        <li>Hashes can still be cracked by guessing; use the library's verify API at login.</li>
+      </ul></div>
+
+      <h2>Choose and tune password-hashing costs</h2>
+      <p>
+        General-purpose fast hashes such as plain SHA-256 are unsuitable password verifiers. MD5 is
+        also unsuitable and has additional cryptographic weaknesses. Password-specific algorithms
+        deliberately impose a cost on each guess.
+      </p>
+      <p>
+        OWASP recommends Argon2id for new password storage, with a listed minimum configuration of
+        19 MiB memory, two iterations and parallelism one. Its guidance includes scrypt when Argon2id
+        is unavailable, bcrypt for legacy systems and PBKDF2 for appropriate compliance requirements.
+        Treat these as a starting point and consult the <a href="https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#password-hashing-algorithms">current algorithm guidance</a>
+        when implementing or upgrading storage.
+      </p>
+      <p>
+        Benchmark on deployment hardware under expected concurrent login load. Parameters control
+        resource use; they do not promise an exact 400-millisecond duration on every machine. Nor does
+        a 400-millisecond server check limit an attacker to a few guesses per second across all their
+        hardware. Memory cost, parallelism, password strength and the attacker's budget change that calculation.
+      </p>
+      <p>
+        Store the chosen parameters with each verifier and upgrade older records after a successful
+        login when appropriate. Apply documented input limits without silently truncating passwords;
+        legacy bcrypt implementations have important length limitations. Online throttling protects
+        your authentication service, while expensive verifiers protect against offline attacks on a
+        stolen database. Neither substitutes for the other.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use password-specific hashing, with Argon2id as the current OWASP preference for new systems.</li>
+        <li>Benchmark memory and CPU costs under concurrency; do not promise fixed cracking times.</li>
+        <li>Upgrade stored parameters and combine offline resistance with online abuse controls.</li>
+      </ul></div>
+
+      <h2>Server-side sessions</h2>
+      <p>
+        After successful authentication, a server-side session lets the client present an opaque
+        credential instead of resending its password. The server maps that credential to the user,
+        expiration and revocation state in a database or shared session store.
+      </p>
+      <ol>
+        <li>Generate an unpredictable session token with a cryptographically secure random generator.</li>
+        <li>Store its association with the authenticated user and the required lifetime metadata.</li>
+        <li>Deliver it through the application's protected credential transport, commonly a cookie.</li>
+        <li>Validate the session on each protected request and obtain the user identity from that trusted lookup.</li>
+      </ol>
+      <p>
+        Measure randomness in <strong>bits of entropy</strong>, not character count. For example,
+        32 uniformly random bytes provide 256 bits and occupy 64 characters when hex-encoded.
+        Padding a predictable identifier does not add entropy. Use the session framework's supported
+        generator and configuration. IP addresses and user-agent strings can assist risk detection or
+        device displays, but neither proves identity and both can change.
+      </p>
+      <p>
+        Regenerate session identifiers after login and privilege changes to prevent session fixation.
+        Enforce server-side idle and absolute expirations, invalidate sessions on logout or compromise,
+        and keep any replicated or cached revocation state consistent with the promised revocation
+        delay. Multiple application instances can share a session store; horizontal scaling does not
+        require JWTs. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html">OWASP's session management guidance</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>A session token is a bearer credential: generate it securely and validate its server-side state.</li>
+        <li>Entropy is measured in bits; token length alone does not establish unpredictability.</li>
+        <li>Rotate identifiers at authentication boundaries and enforce expiration and revocation.</li>
+      </ul></div>
+
+      <h2>Cookies, sites and origins</h2>
+      <p>
+        Cookies are a browser credential transport, not a session architecture. They can carry an
+        opaque session token or a JWT. For a typical first-party session, a deliberately configured
+        cookie might have the following shape; the value below represents a generated token.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Illustrative first-party session cookie</div>
+        <pre><code>Set-Cookie: __Host-session=GENERATED_SESSION_TOKEN; Path=/; Secure; HttpOnly; SameSite=Lax</code></pre>
+      </div>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Attribute</th><th>Protection or behavior</th></tr></thead>
+        <tbody>
+          <tr><td>HttpOnly</td><td>Prevents JavaScript from reading the cookie. It does not stop scripts from making authenticated requests.</td></tr>
+          <tr><td>Secure</td><td>Restricts transmission to HTTPS in normal production use.</td></tr>
+          <tr><td>SameSite=Strict</td><td>Excludes the cookie from cross-site requests, including an initial navigation from another site.</td></tr>
+          <tr><td>SameSite=Lax</td><td>Also permits cross-site top-level navigations using safe methods, such as following a GET link.</td></tr>
+          <tr><td>SameSite=None</td><td>Allows cross-site use subject to browser policy; requires Secure.</td></tr>
+          <tr><td>__Host- prefix</td><td>Requires Secure, Path=/ and no Domain attribute in supporting browsers, restricting the cookie to its host.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        <strong>Site and origin differ.</strong> An origin includes scheme, hostname and port. A site
+        normally combines scheme and registrable domain. Thus <code>https://app.example.test</code>
+        and <code>https://api.example.test</code> are different origins but the same site. SameSite is
+        not a rule that only your exact frontend origin may send requests.
+      </p>
+      <p>
+        Choose cookie scope and SameSite behavior for the actual deployment and login redirects.
+        None can be necessary for legitimate cross-site integrations; it needs appropriate CSRF
+        defenses, and browsers may still restrict third-party cookies. Lax does not enable cross-site
+        fetch requests merely because frontend and backend are on different sites. Set attributes
+        explicitly rather than relying on browser defaults. See <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie">MDN's Set-Cookie reference</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use Secure and HttpOnly for browser session cookies, with deliberate scope and SameSite settings.</li>
+        <li>Same-site and same-origin are different boundaries.</li>
+        <li>HttpOnly reduces token theft through JavaScript but does not neutralize XSS or CSRF.</li>
+      </ul></div>
+
+      <h2>JWTs: decode, verify and authorize separately</h2>
+      <p>
+        A common signed JWT has three base64url-encoded components separated by dots: a header,
+        a claims payload and a signature or MAC. Other JWT representations exist, including encrypted
+        tokens. A normal signed JWT is <strong>not encrypted</strong>; its payload is readable by anyone
+        holding the token. Store only claims the recipient needs. See the <a href="https://www.rfc-editor.org/rfc/rfc7519.html">JWT specification</a>.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Claim</th><th>Meaning and validation concern</th></tr></thead>
+        <tbody>
+          <tr><td>sub</td><td>Subject identifier, interpreted in the trusted issuer's identity space.</td></tr>
+          <tr><td>iss / aud</td><td>Issuer and intended audience; ensure the token was issued by the expected authority for this service.</td></tr>
+          <tr><td>exp</td><td>Expiration time; require and enforce it for expiring authentication tokens.</td></tr>
+          <tr><td>nbf</td><td>Earliest valid time, when present.</td></tr>
+          <tr><td>iat</td><td>Issuance time. It does not by itself define or enforce expiration.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Decoding only reads the content. Verification must use an explicitly allowed algorithm and a
+        trusted key, then enforce the required claims, token purpose and lifetime. Do not let an
+        untrusted token choose an arbitrary algorithm or key source. Symmetric algorithms use a shared
+        secret; asymmetric algorithms use a private signing key and public verification key. Follow
+        <a href="https://www.rfc-editor.org/rfc/rfc8725">JWT best current practices</a> through a maintained library.
+      </p>
+      <p>
+        A valid signature establishes integrity and authenticity under that key; it does not prove
+        every claim is appropriate for this endpoint or still current. An old admin claim may outlive
+        a role change. Continue to enforce resource authorization and the application's revocation
+        policy. A JWT is a token format: systems using JWTs can still keep server-side state.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Decoding a JWT is not verification, and signing does not hide its payload.</li>
+        <li>Validate algorithms, trusted keys, issuer, audience, token purpose and expiration.</li>
+        <li>Verified claims still need authorization and a strategy for changed permissions or revoked access.</li>
+      </ul></div>
+
+      <h2>Revocation, refresh tokens and browser storage</h2>
+      <p>
+        A self-contained access token can remain valid until expiration even after the user logs out
+        or loses a permission. Deleting the browser's copy does not invalidate a stolen copy.
+        Immediate revocation requires an additional mechanism, such as a server-side session, token
+        denylist, account version check or token introspection. Define the maximum delay your system permits.
+      </p>
+      <p>
+        Short-lived access tokens reduce the exposure window. A refresh token lets an authorized
+        client obtain replacements, but it is itself a valuable credential. Protect it in transit and
+        storage, keep revocable server-side grant state, and use a supported replay-defense design.
+        Rotation invalidates the old refresh token and retains its relationship to the replacement so
+        reuse can trigger revocation. OAuth's security guidance requires rotation or sender constraint
+        for public-client refresh tokens. See <a href="https://www.rfc-editor.org/rfc/rfc9700">RFC 9700</a>.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Browser storage</th><th>Main tradeoff</th></tr></thead>
+        <tbody>
+          <tr><td>localStorage or sessionStorage</td><td>Accessible to same-origin JavaScript, including injected scripts. They are not secure vaults for long-lived bearer credentials.</td></tr>
+          <tr><td>JavaScript memory</td><td>Avoids persistence across reloads but remains exposed to compromised code in the running application.</td></tr>
+          <tr><td>HttpOnly cookie</td><td>Restricts JavaScript reads, but automatic cookie transmission requires CSRF defenses.</td></tr>
+          <tr><td>Server-held tokens behind a browser session</td><td>Reduces browser token exposure while requiring a server-side session and its operational controls.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        A stolen refresh token may obtain new access tokens; short access-token lifetime alone is not
+        enough. Refresh rotation must also handle concurrent legitimate refreshes deliberately.
+        Choose a maintained session or token flow that meets your clients' needs rather than assuming
+        either stateful sessions or JWTs are universally superior.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Specify revocation behavior explicitly; deleting a local token does not revoke stolen copies.</li>
+        <li>Protect refresh tokens, detect replay and retain revocable grant state.</li>
+        <li>Browser storage changes exposure to XSS and CSRF; it does not remove both risks.</li>
+      </ul></div>
+
+      <h2>Rate limiting and account takeover defenses</h2>
+      <p>
+        Login, recovery and verification endpoints need abuse controls. Brute force tries many
+        passwords against an account; password spraying tries a small set across many accounts;
+        credential stuffing reuses credentials leaked elsewhere. These patterns need overlapping defenses.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Control</th><th>Benefit</th><th>Limit to consider</th></tr></thead>
+        <tbody>
+          <tr><td>Per-IP throttling</td><td>Restricts concentrated traffic from one address.</td><td>Many legitimate users can share an IP; attackers can distribute traffic.</td></tr>
+          <tr><td>Per-account throttling</td><td>Restricts distributed guessing against one account.</td><td>Rigid lockouts can let an attacker deny access to the account owner.</td></tr>
+          <tr><td>Service-wide capacity controls</td><td>Protects expensive hashing and downstream resources.</td><td>A single low global limit can block all legitimate logins during an attack.</td></tr>
+          <tr><td>Risk-based challenges and MFA</td><td>Adds friction or another proof for suspicious activity.</td><td>Needs accessible recovery and does not replace ordinary rate controls.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Set thresholds from expected traffic and risk rather than copying “five failures means a
+        24-hour lock.” Use bounded delays, appropriate challenges, alerts and recovery flows that do
+        not disclose account existence. Where available, phishing-resistant authentication such as
+        passkeys can reduce reliance on reusable passwords. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html#protect-against-automated-attacks">OWASP's automated-attack guidance</a>.
+      </p>
+      <p>
+        Distributed instances need coordinated counters where limits are meant to be shared.
+        Trust forwarded client-IP headers only from configured trusted proxies; a client-supplied
+        <code>X-Forwarded-For</code> value is not authoritative. Consider request size, concurrency
+        and cost as well as request count, and return a consistent rate-limit response such as 429.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Combine IP, account and service-level controls for different abuse patterns.</li>
+        <li>Design lockouts and global limits so attackers cannot easily deny service to legitimate users.</li>
+        <li>Protect expensive work and use trusted proxy configuration when identifying clients.</li>
+      </ul></div>
+
+      <h2>Object-level authorization and tenant isolation</h2>
+      <p>
+        Authentication establishes an identity. Authorization decides whether that identity may
+        perform this action on this resource. A permission such as “read invoices” does not necessarily
+        allow reading every invoice. Changing <code>/invoices/5</code> to another ID must never bypass
+        the resource's access policy.
+      </p>
+      <p>
+        <strong>Broken object-level authorization (BOLA)</strong> occurs when an application fails to
+        enforce those resource permissions. Insecure direct object reference, or <strong>IDOR</strong>,
+        describes a closely related access-control failure involving user-controlled references.
+        Numeric IDs, UUIDs and strings all need authorization. See <a href="https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/">OWASP's BOLA explanation</a>.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Example policy: an owner may read their own invoice within an authorized tenant</div>
+        <pre><code>SELECT id, total, status
+FROM invoices
+WHERE id = $1
+  AND tenant_id = $2
+  AND owner_id = $3;
+
+$1 = validated requested invoice ID
+$2 = tenant verified through the authenticated user's membership
+$3 = authenticated user ID from trusted server context</code></pre>
+      </div>
+      <p>
+        This owner-only policy is an example, not a universal rule. Shared resources, organizational
+        roles and delegated access need their own relationship checks. Centralize policy decisions,
+        then enforce them at every access path. Query scoping, a service policy check and properly
+        configured database row-level security are possible tools; the number of layers alone does
+        not determine whether authorization is correct.
+      </p>
+      <p>
+        Apply permissions to updates, deletes, exports, batch operations and related-object creation
+        too. For a write, make the permission condition part of the mutation or otherwise protect
+        against changes between checking and using the resource. Assign owner and tenant fields from
+        authorized context instead of trusting them in the request body.
+      </p>
+      <p>
+        A scoped lookup can return 404 for both missing and inaccessible records when hiding existence
+        is part of the policy. A 403 is still appropriate when acknowledging existence is acceptable.
+        Avoid inconsistent bodies or timing that undermine the intended concealment. Random identifiers
+        can reduce easy enumeration, but changing integers to UUIDs never fixes missing authorization.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Authorize the particular action, object and tenant, not merely the route or login.</li>
+        <li>Enforce policy on reads and writes using trusted identity and membership context.</li>
+        <li>UUIDs and concealed error responses supplement access checks; neither replaces them.</li>
+      </ul></div>
+
+      <h2>Function-level authorization and default denial</h2>
+      <p>
+        <strong>Broken function-level authorization (BFLA)</strong> lets someone invoke an operation
+        their identity should not be allowed to use. An admin page hidden from ordinary navigation
+        still needs an enforced admin policy on its APIs. A user can discover or guess a URL and call
+        it directly. See <a href="https://owasp.org/API-Security/editions/2023/en/0xa5-broken-function-level-authorization/">OWASP's BFLA guidance</a>.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Access-control failure</th><th>Example</th><th>Required boundary</th></tr></thead>
+        <tbody>
+          <tr><td>Horizontal</td><td>A customer reads another customer's private invoice.</td><td>Object ownership, sharing and tenant permissions.</td></tr>
+          <tr><td>Vertical</td><td>A customer invokes an administrator's refund or export function.</td><td>Authority to perform the privileged operation.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        These categories are useful mental models, not mutually exclusive implementation layers.
+        An admin role does not automatically grant global access: a tenant administrator may still be
+        restricted to one organization. Express the intended authority clearly, through roles,
+        capabilities, attributes or relationships rather than assuming all users with one role have
+        the same scope.
+      </p>
+      <p>
+        Adopt <strong>deny by default</strong>: an operation is forbidden unless policy explicitly
+        allows it. Centralize the rules so they are reviewable, while enforcing them wherever access
+        occurs, including alternate endpoints and background actions. A policy error must not silently
+        become an allow decision. Changes to authorization require tests for both permitted and denied
+        cases. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html">OWASP's authorization recommendations</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Hidden URLs and buttons do not protect privileged functions.</li>
+        <li>Check both operation privileges and resource scope, including for administrators.</li>
+        <li>Centralize policy, enforce it on every relevant path and deny unless explicitly allowed.</li>
+      </ul></div>
+
+      <h2>XSS: untrusted content becomes browser code</h2>
+      <p>
+        Cross-site scripting, or XSS, lets attacker-controlled content execute in the context of a
+        trusted application. That code can read accessible page data, modify what the user sees,
+        make authenticated requests or steal JavaScript-accessible credentials. HttpOnly cookies
+        restrict direct cookie reads but do not prevent those authenticated actions.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Term</th><th>What it describes</th><th>Example</th></tr></thead>
+        <tbody>
+          <tr><td>Stored XSS</td><td>Attack content persists and reaches later viewers.</td><td>A saved comment is rendered as unsafe HTML.</td></tr>
+          <tr><td>Reflected XSS</td><td>Attack content arrives in a request and is reflected unsafely into a response.</td><td>A search term becomes executable page markup.</td></tr>
+          <tr><td>DOM-based XSS</td><td>Client-side code moves untrusted data into a dangerous browser sink.</td><td>A URL fragment is assigned to an HTML-parsing API.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Persistence and execution location are different dimensions, so these descriptions can overlap.
+        A Markdown discussion board illustrates the risk: a user writes content, the system stores it,
+        a renderer creates HTML, and other users' browsers parse the result. Raw HTML features, unsafe
+        links or plugins can introduce executable behavior unless the rendering pipeline controls them.
+      </p>
+      <p>
+        Removing literal script tags is insufficient. Event-handler attributes and dangerous URL
+        contexts are among the other ways content can become active. Script elements inserted through
+        some APIs may be inert, but that does not make arbitrary <code>innerHTML</code> safe.
+        Understand the actual browser sink and use the corresponding defense. See
+        <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html">OWASP's XSS prevention guidance</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>XSS executes attacker-controlled code with the application's browser privileges.</li>
+        <li>Stored, reflected and DOM-based describe related ways unsafe content reaches execution.</li>
+        <li>HttpOnly cookies and removal of script tags do not eliminate XSS.</li>
+      </ul></div>
+
+      <h2>Render safely and add a content security policy</h2>
+      <p>
+        Choose the defense for the output context. Ordinary text should remain text: use the framework's
+        escaped text rendering or a suitable text sink. An HTML attribute, a URL and a JavaScript
+        expression are different contexts; a generic “sanitize input” function cannot safely cover all of them.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Plain text belongs in an ordinary element's text content</div>
+        <pre><code>commentElement.textContent = userComment;</code></pre>
+      </div>
+      <p>
+        When rich HTML is actually required, use a maintained allowlist-based sanitizer with a deliberate
+        tag, attribute and URL policy. For Markdown, review raw HTML support and plugins, and sanitize
+        the final generated HTML before an unsafe rendering sink. Do not modify sanitized output in ways
+        that restore dangerous markup. React's <code>dangerouslySetInnerHTML</code> bypasses normal text
+        escaping; it does not sanitize the supplied HTML. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html#html-sanitization">OWASP's sanitization guidance</a>.
+      </p>
+      <p>
+        Sanitizing content at ingestion may be useful, but does not permanently make that stored value
+        safe in every future output context. Maintain the rendering boundary and keep sanitizers and
+        renderers updated. Storing raw text is not itself XSS; rendering it through an unsafe path is the problem.
+      </p>
+      <p>
+        <strong>Content Security Policy (CSP)</strong> adds browser-enforced restrictions on script and
+        resource loading. A carefully configured policy can block many injection paths. Nonce-based
+        policies need unpredictable nonces generated for each response and applied only to trusted
+        scripts; hash-based policies allow specified script contents. Avoid weakening the policy with
+        broad allowances just to silence violations. Report-only rollout helps find compatibility
+        issues but does not block anything. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html">OWASP's CSP guidance</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use escaped text for plain content and a maintained sanitizer when rich HTML is required.</li>
+        <li>Match defenses to the final output context, including Markdown plugins and raw-HTML rendering.</li>
+        <li>CSP is an additional containment layer; report-only policies do not enforce restrictions.</li>
+      </ul></div>
+
+      <h2>CSRF: a credential is not proof of intent</h2>
+      <p>
+        Cross-site request forgery tricks a browser into making an unwanted request using credentials
+        it attaches automatically. For example, a user is logged into a service and visits another
+        page that submits a form to it. If the browser attaches the session cookie and the server
+        accepts the request without checking its intent, a state-changing operation may succeed.
+        The attacker need not read the response.
+      </p>
+      <p>
+        CSRF still matters for modern cookie-authenticated applications. Framework protections can
+        help only when enabled and correctly integrated. SameSite reduces exposure, but “Lax means
+        immune” is incorrect: unsafe state changes behind GET endpoints and untrusted same-site
+        subdomains are examples of remaining risk.
+      </p>
+      <ul>
+        <li>Keep GET and other safe methods free of requested state-changing actions.</li>
+        <li>Use the framework's supported CSRF protection on state-changing endpoints, typically a session-bound synchronizer token or an appropriately signed, session-bound double-submit design.</li>
+        <li>Check allowed request origins using a deliberate Origin/Referer policy, including how missing headers and trusted proxies are handled.</li>
+        <li>Configure SameSite and cookie scope as additional controls; Fetch Metadata checks can further restrict unwanted browser request contexts.</li>
+        <li>For sensitive actions, require appropriate reauthentication or explicit transaction confirmation.</li>
+      </ul>
+      <p>
+        CSRF tokens must be validated by the server, not merely included in forms. A design using
+        authorization headers that the browser does not automatically attach changes the CSRF threat,
+        but cookie-based refresh or login endpoints still need consideration. XSS can often defeat
+        CSRF controls by executing within the trusted application. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html">OWASP's CSRF prevention guidance</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>CSRF exploits automatically attached credentials; the attacker may never need the response.</li>
+        <li>Use supported CSRF protection, origin checks and deliberate cookie settings.</li>
+        <li>Modern frameworks and SameSite defaults do not justify ignoring CSRF.</li>
+      </ul></div>
+
+      <h2>CORS governs browser response access</h2>
+      <p>
+        Cross-Origin Resource Sharing lets a server tell a browser which origins may read certain
+        responses. It is a browser security mechanism, not user authentication or a firewall that
+        ensures every request came from your frontend.
+      </p>
+      <p>
+        Some cross-origin requests are sent without a preflight, including eligible form submissions.
+        If CORS response headers are absent, the browser may still have sent the request and the server
+        may already have performed its side effects; the script is prevented from reading the response.
+        Other requests require a successful preflight before the actual request is sent.
+      </p>
+      <p>
+        Use an explicit allowlist of trusted origins for credentialed access. Do not blindly reflect
+        any supplied Origin or assume a wildcard supports credentialed response access. Direct HTTP
+        clients do not enforce browser CORS rules. Continue to authenticate, authorize and defend
+        state-changing actions on the server. See <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS">MDN's CORS guide</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>CORS controls browser access to responses; it does not authenticate callers.</li>
+        <li>A browser-blocked response does not mean the request never reached the server.</li>
+        <li>Use deliberate origin allowlists and independent authorization and CSRF defenses.</li>
+      </ul></div>
+
+      <h2>Secrets, logs and security headers</h2>
+      <p>
+        Misconfiguration can undermine otherwise correct code. Keep secrets out of source control,
+        frontend bundles, images and diagnostic output. Use protected deployment configuration or a
+        secret manager with least-privilege access. Environment variables are a delivery mechanism,
+        not automatic encryption or protection against process access and accidental logging.
+      </p>
+      <p>
+        If a credential enters a repository, revoke or rotate it promptly and investigate its exposure.
+        Deleting the latest file does not remove copies in history, forks or logs. Validate required
+        security configuration at startup and fail safely when it is missing. See
+        <a href="13-configuration.html">configuration and secret management</a>.
+      </p>
+      <p>
+        Disable public debug interfaces and detailed exception responses in production. Log severity
+        is not a redaction mechanism: secrets are unsafe at info level too. Keep passwords, bearer
+        tokens, API keys and unnecessary personal data out of every log level. Restricted diagnostic
+        logs may contain carefully handled stack traces; client responses should not expose them.
+        Use <a href="12-error-handling.html">safe error responses</a> and
+        <a href="14-observability.html">controlled telemetry access and retention</a>.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Response policy</th><th>What it helps control</th></tr></thead>
+        <tbody>
+          <tr><td>Content-Security-Policy</td><td>Permitted scripts and other browser resource behavior.</td></tr>
+          <tr><td>CSP frame-ancestors</td><td>Which ancestors may embed a page, reducing clickjacking exposure.</td></tr>
+          <tr><td>X-Frame-Options</td><td>An older framing restriction, useful where appropriate alongside a compatible policy.</td></tr>
+          <tr><td>Strict-Transport-Security</td><td>Directs browsers to use HTTPS for the configured host policy; plan rollout and subdomain scope carefully.</td></tr>
+          <tr><td>X-Content-Type-Options: nosniff</td><td>Restricts MIME sniffing; also serve correct content types.</td></tr>
+          <tr><td>Referrer-Policy</td><td>Controls how much referrer information leaves a page.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Clickjacking tricks users into interacting with an embedded interface. Embedding alone does not
+        grant the outer page unrestricted access to a cross-origin frame's contents. Use the appropriate
+        framing policy rather than relying on hidden URLs. Security middleware can provide useful
+        defaults, but configure them for the application and verify actual responses through proxies.
+        See <a href="https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html">OWASP's HTTP header guidance</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Protect secrets throughout their lifecycle and rotate exposed credentials.</li>
+        <li>Disable public debugging and redact sensitive data at every log level.</li>
+        <li>Configure and verify browser security headers for the application's actual deployment.</li>
+      </ul></div>
+
+      <h2>Verify the boundaries and keep learning</h2>
+      <p>
+        Review a request from entry to side effect: validate its shape, authenticate the caller,
+        authorize the operation and resource, use safe database or process APIs, and render the result
+        for its specific context. Valid input can still request an unauthorized action; a parameterized
+        query can still expose another tenant's data. Each control has a different job.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Automated scenario</th><th>Required result</th></tr></thead>
+        <tbody>
+          <tr><td>User A requests or modifies user B's private object</td><td>No unauthorized data or mutation, including through batch and export paths.</td></tr>
+          <tr><td>A member invokes an admin function or changes tenant IDs</td><td>Operation and tenant policies deny access.</td></tr>
+          <tr><td>A query value contains punctuation or an unexpected object</td><td>It remains bound data or fails schema validation; query structure stays fixed.</td></tr>
+          <tr><td>A token is altered, expired, revoked or intended for another audience</td><td>Authentication rejects it according to the configured policy.</td></tr>
+          <tr><td>A comment contains active markup</td><td>It renders as intended safe content without executing attacker code.</td></tr>
+          <tr><td>A state-changing cookie-authenticated request lacks valid CSRF proof</td><td>The server rejects it before changing state.</td></tr>
+          <tr><td>A password or token appears in an error path</td><td>It does not leak into responses or logs.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Run relevant regression tests in CI and update them as policies change. Passing tests proves
+        the covered cases, not the absence of every vulnerability. Review dependencies, framework
+        defaults and configuration changes too. Test deployed browser behavior where cookies, CSP and
+        CORS interact with the real frontend and proxy setup.
+      </p>
+      <p>
+        Audit privileged actions, policy changes and suspicious patterns with actor, action, resource,
+        result, timestamp and a correlation identifier. Protect audit access and integrity. A denied
+        request is not automatically a confirmed breach: distinguish mistakes from repeated probing,
+        and use actionable alerts with an incident-response path.
+      </p>
+      <p>
+        Continue with the <a href="https://portswigger.net/web-security">PortSwigger Web Security Academy</a>
+        for guided labs, the <a href="https://owasp.org/www-project-top-ten/">OWASP Top 10</a> for broad
+        risk categories, and the <a href="https://cheatsheetseries.owasp.org/">OWASP Cheat Sheet Series</a>
+        for implementation guidance. Explore additional boundaries such as SSRF, file uploads, path
+        traversal and dependency security as they become relevant to your application. Practice in
+        dedicated labs or systems you are authorized to test.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Test denied actions, malformed input and security-state changes as deliberately as successful requests.</li>
+        <li>Use protected audit evidence and actionable alerts without treating every denial as a breach.</li>
+        <li>Maintain controls and tests over time; OWASP and PortSwigger provide deeper guidance and practice.</li>
+      </ul></div>
+    </div>
+
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; a study guide for curious engineers.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+
+</div>
+
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</dialog>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>

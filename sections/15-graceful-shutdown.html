@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graceful Shutdown &middot; Backend Principles</title>
+<meta name="description" content="Graceful backend shutdown: process life cycles, SIGTERM, SIGINT, SIGKILL, request draining, readiness, deadlines, transactions, workers, WebSockets, resource cleanup and verification.">
+<script>
+  (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try {
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell">
+
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 15</p>
+      <h1>Graceful Shutdown</h1>
+      <p class="lead">
+        Stop taking new work, give existing work a bounded chance to finish, release resources and exit.
+        A reliable backend plans its <strong>departure</strong> as carefully as its startup.
+      </p>
+    </header>
+
+    <div class="prose">
+      <h2>Why shutting down is part of correctness</h2>
+      <p>
+        A customer is paying for an order when a deployment replaces the server handling the request.
+        The replacement instance may already be healthy, but the old instance still has work in progress.
+        Starting the new server does not finish the old server's requests or transfer its memory to the replacement.
+      </p>
+      <p>
+        <strong>Graceful shutdown</strong> is a controlled transition from serving work to exiting:
+        stop accepting new work, let accepted work finish within a deadline, clean up resources, then terminate.
+        Think of a restaurant closing its entrance while allowing seated customers time to finish their meals.
+        Closing time still has a limit; the restaurant cannot wait forever.
+      </p>
+      <div class="callout callout--warn">
+        <div class="callout-label">A limit to the guarantee</div>
+        <p>
+          Graceful shutdown reduces avoidable interruptions. It does not guarantee exactly-once processing
+          or prevent every duplicate payment. A provider may complete a charge before the server loses
+          its connection or exits without returning a response. Retrying that operation still requires
+          idempotency, durable transaction state and reconciliation.
+        </p>
+      </div>
+      <p>
+        Planned deployments are only one reason a process stops. Scaling down, maintenance and operator
+        actions can also request shutdown. Crashes, machine failures and forced termination may leave
+        no cleanup opportunity, so recovery must also work after an abrupt exit. Connect this topic to
+        <a href="12-error-handling.html">fault tolerance</a> and <a href="10-background-jobs.html">safe job retries</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Graceful shutdown stops new work, drains existing work, releases resources and exits within a deadline.</li>
+        <li>A healthy replacement instance does not finish requests already running on the old instance.</li>
+        <li>Retries and crash recovery still need idempotency and durable state.</li>
+      </ul></div>
+
+      <h2>The process life cycle</h2>
+      <p>
+        Your application runs inside an operating-system process. Its life cycle includes startup,
+        normal operation and termination. The application can expose more useful operational states
+        than simply “running” or “stopped.”
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>State</th><th>What the application does</th><th>Accept new business work?</th></tr></thead>
+        <tbody>
+          <tr><td>Starting</td><td>Validate configuration, initialize dependencies and prepare listeners.</td><td>No, until initialization succeeds.</td></tr>
+          <tr><td>Ready</td><td>Serve requests and process jobs normally.</td><td>Yes.</td></tr>
+          <tr><td>Draining</td><td>Withdraw from routing, stop work intake and finish accepted operations.</td><td>No, after the coordinated admission cutoff.</td></tr>
+          <tr><td>Cleaning up</td><td>Release resources that no active operation still needs.</td><td>No.</td></tr>
+          <tr><td>Exited</td><td>The process has terminated; the supervisor observes its outcome.</td><td>No.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Keep the transition into shutdown coordinated and safe to request more than once. Two signals
+        must not launch two competing cleanup routines or reset the deadline indefinitely. If startup
+        fails halfway through, release the resources already acquired even though the application never
+        became ready. The same ownership rules apply to startup failure and normal shutdown.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Model startup, readiness, draining, cleanup and exit as distinct states.</li>
+        <li>Run one shutdown sequence even when multiple stop requests arrive.</li>
+        <li>Clean up partially initialized applications as well as fully running ones.</li>
+      </ul></div>
+
+      <h2>SIGTERM, SIGINT and SIGKILL</h2>
+      <p>
+        On Unix-style systems, signals notify processes of events. They can come from the kernel,
+        another process or terminal activity. The following signals commonly matter for shutdown;
+        platform-specific behavior should be checked for other operating systems.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Signal</th><th>Meaning</th><th>Application response</th></tr></thead>
+        <tbody>
+          <tr><td><code>SIGTERM</code></td><td>A termination request, commonly sent by a supervisor.</td><td>Can be handled to begin graceful shutdown.</td></tr>
+          <tr><td><code>SIGINT</code></td><td>An interrupt; Ctrl+C normally sends it to the terminal's foreground process group.</td><td>Can usually enter the same shutdown path.</td></tr>
+          <tr><td><code>SIGKILL</code></td><td>Forced termination.</td><td>Cannot be caught, blocked or ignored; no application cleanup handler runs.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Both SIGTERM and SIGINT normally terminate a process unless its handling changes that behavior.
+        Registering appropriate handling is what provides a cleanup opportunity. SIGINT can also be
+        sent programmatically; it does not require a keyboard. See the <a href="https://man7.org/linux/man-pages/man7/signal.7.html">Linux signal reference</a>.
+      </p>
+      <p>
+        A signal does not negotiate extra time. The supervisor defines any grace period and escalation.
+        For example, <a href="https://pm2.keymetrics.io/docs/usage/signals-clean-restart/">PM2's documented stop flow</a>
+        sends SIGINT by default, then SIGKILL if its configurable timeout expires. Do not assume every
+        process manager starts with SIGTERM or gives the same amount of time.
+      </p>
+      <p>
+        Use your runtime's signal notification or lifecycle facility to trigger normal shutdown code.
+        Low-level POSIX signal handlers have strict restrictions on safe operations; arbitrary logging,
+        database calls and cleanup should not run directly inside such a handler.
+        See <a href="https://man7.org/linux/man-pages/man7/signal-safety.7.html">signal-handler safety</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Handle SIGTERM and SIGINT through one coordinated shutdown path.</li>
+        <li>SIGKILL provides no cleanup opportunity; SIGINT is not restricted to keyboard input.</li>
+        <li>Check your supervisor's actual stop signal and deadline.</li>
+      </ul></div>
+
+      <h2>One coordinated shutdown sequence</h2>
+      <p>
+        The exact APIs differ across frameworks, but the sequence should protect work before removing
+        the resources it uses. For a service with HTTP handlers and background workers, a typical plan is:
+      </p>
+      <ol>
+        <li><strong>Enter draining once.</strong> Record the reason and establish the overall deadline.</li>
+        <li><strong>Withdraw from traffic.</strong> Mark the instance unready and coordinate removal from routing.</li>
+        <li><strong>Stop new work intake.</strong> Stop admitting new requests, scheduling tasks and claiming jobs.</li>
+        <li><strong>Drain accepted work.</strong> Wait for active requests and jobs; keep their dependencies available.</li>
+        <li><strong>Apply the deadline policy.</strong> Cancel remaining work cooperatively and use bounded forced cleanup if necessary.</li>
+        <li><strong>Release dependencies.</strong> Close clients, pools and owned resources after their users stop.</li>
+        <li><strong>Flush telemetry and exit.</strong> Allow a short flush window and report the actual shutdown outcome.</li>
+      </ol>
+      <p>
+        Some steps overlap. An HTTP request may finish while routing updates propagate, and independent
+        worker pools may drain concurrently. What matters is the dependency relationship: a worker that
+        still needs the database must finish before that database pool closes.
+      </p>
+      <p>
+        If an accepted request needs to enqueue a durable job, leave its producer connection available
+        until the enqueue finishes. Local workers can stop claiming jobs while other healthy workers
+        process queued work. An HTTP framework's shutdown method does not automatically track every
+        goroutine, timer or detached task your application started.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Stop producers of new work before waiting for the active work to finish.</li>
+        <li>Keep shared dependencies alive until all their users have stopped.</li>
+        <li>Track application-owned tasks explicitly; HTTP shutdown alone is not whole-process shutdown.</li>
+      </ul></div>
+
+      <h2>Draining HTTP requests</h2>
+      <p>
+        An <strong>in-flight request</strong> has been accepted and has not yet finished. During draining,
+        let these requests complete while preventing the instance from accumulating more work. A
+        request that is halfway through validating an order or writing a response should not lose its
+        connection just because a deployment began.
+      </p>
+      <p>
+        Closing the listening socket only stops new connections. Existing HTTP/1.1 keep-alive
+        connections can carry more requests, and HTTP/2 can carry multiple streams on one connection.
+        Use your server's protocol-aware shutdown facility and verify how it handles existing
+        connections, new requests on them and active response bodies.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Illustrative request timeline</div>
+        <pre><code>Request A accepted -------- processing -------- response completed
+Request B accepted ------------ processing -------- response completed
+                        |
+                   drain begins
+                   no new business work admitted
+                                                         |
+                                                  active count = 0
+                                                  release dependencies</code></pre>
+      </div>
+      <p>
+        A load balancer may still send a request while its routing information is updating. Decide
+        how that request is handled before it has side effects. A temporary rejection can be appropriate,
+        but clients and proxies must follow a safe retry policy. A broken connection or retryable
+        response is not permission to repeat a non-idempotent operation blindly.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Drain requests already accepted while preventing an unbounded stream of new work.</li>
+        <li>Closing a listener alone does not handle keep-alive requests or HTTP/2 streams.</li>
+        <li>Define safe behavior for traffic that arrives during routing changes.</li>
+      </ul></div>
+
+      <h2>Readiness, routing and deployments</h2>
+      <p>
+        Shutdown is a coordination problem between the application, its supervisor and the traffic
+        infrastructure. Readiness answers whether an instance should receive new traffic; liveness
+        answers whether it needs recovery. Planned draining should withdraw readiness without pretending
+        the process has crashed. See <a href="12-error-handling.html">health checks and failure containment</a>.
+      </p>
+      <p>
+        Bring replacement capacity online before retiring old capacity. Then coordinate routing removal
+        and the admission cutoff so stale routes do not cause unnecessary failures. If propagation needs
+        a waiting window, measure it and count it within the shutdown budget. A fixed sleep by itself
+        neither proves routing has updated nor proves work has finished.
+      </p>
+      <p>
+        In the normal Kubernetes Pod termination flow, the grace period defaults to 30 seconds.
+        A configured <code>preStop</code> hook consumes that same budget before the container's stop
+        signal is sent. Terminating endpoints become unready for regular traffic, and processes still
+        running after the grace period face forced termination. Routing and local shutdown proceed
+        concurrently, so do not assume instantaneous traffic removal. See the
+        <a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination">Kubernetes termination flow</a>.
+      </p>
+      <p>
+        Also verify that signals reach the application in the deployed container. A shell wrapper may
+        intercept or fail to forward them. Docker's exec-form <code>ENTRYPOINT</code> or
+        <code>CMD</code> avoids an unnecessary shell parent; wrappers and init processes need deliberate
+        forwarding behavior. See <a href="https://docs.docker.com/reference/build-checks/json-args-recommended/">Docker's signal-handling guidance</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Coordinate readiness, routing removal and request draining with replacement capacity.</li>
+        <li>Include routing delays and lifecycle hooks in the platform's termination budget.</li>
+        <li>Verify signal delivery through the real container entrypoint or process manager.</li>
+      </ul></div>
+
+      <h2>Choose one bounded shutdown budget</h2>
+      <p>
+        The shutdown deadline balances completing legitimate work against deployments that cannot finish.
+        Choose it using request and job durations, dependency timeouts and operational requirements.
+        Thirty or sixty seconds may be a useful example, but neither is universally sufficient.
+        Unbounded work needs a cancellation, checkpoint or handoff strategy.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Example phase</th><th>Illustrative budget</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td>Routing withdrawal</td><td>First 3 seconds</td><td>Allow the configured traffic path to stop selecting this instance.</td></tr>
+          <tr><td>Drain and cancellation</td><td>Up to second 23</td><td>Finish work, then cancel remaining operations with time left to settle.</td></tr>
+          <tr><td>Cleanup and telemetry</td><td>Up to second 27</td><td>Release resources and flush bounded diagnostic buffers.</td></tr>
+          <tr><td>Platform margin</td><td>Remaining 3 seconds</td><td>Leave room before a hypothetical 30-second forced-stop deadline.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        These are planning numbers, not recommended defaults. All phases share one overall deadline;
+        giving each of five sequential phases a fresh 30 seconds does not fit a 30-second platform limit.
+        Sub-deadlines should reserve time for later phases and never extend the overall budget.
+      </p>
+      <p>
+        Keep the signal notification separate from the context used to drain. If the signal cancels a
+        context, passing that already-cancelled context into shutdown can cause it to return immediately.
+        Create a fresh bounded shutdown context. Cancel active work when its drain allowance expires;
+        cancellation is cooperative and cannot force arbitrary code to stop.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use one overall deadline with time reserved for cleanup and a margin before forced termination.</li>
+        <li>Select budgets from measured workload behavior, not a universal 30-second rule.</li>
+        <li>Use a fresh shutdown context and define what happens when cooperative cancellation is insufficient.</li>
+      </ul></div>
+
+      <h2>Database connections and transaction outcomes</h2>
+      <p>
+        Closing your application's database pool releases its client connections. It does not shut
+        down the shared database server or stop other applications from using it. Networked databases
+        commonly use TCP connections, but local sockets and embedded databases are other possibilities.
+        Shutdown behavior belongs to the actual client and driver you use.
+      </p>
+      <p>
+        Let request and job owners finish their database operations before closing their pool. A
+        transaction should commit only when its business operation is complete and valid; otherwise
+        it should roll back. Shutdown is not a reason to commit every open transaction. A pool-close
+        call is also not a substitute for explicit transaction ownership.
+      </p>
+      <p>
+        Losing a client connection does not normally corrupt a transactional database. PostgreSQL
+        rolls back a transaction still open when the session terminates. However, detecting a disconnect
+        can take time, and a statement running in autocommit mode may finish and commit before the
+        disconnect is noticed. See <a href="https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-TERMINATION">PostgreSQL's termination semantics</a>.
+      </p>
+      <div class="callout callout--key">
+        <div class="callout-label">Unknown outcome is different from failure</div>
+        <p>
+          If a COMMIT succeeds but its reply is lost, the client may not know whether the operation
+          completed. The same uncertainty occurs with external payment APIs. Use a stable operation
+          identifier, check durable state and reconcile the result before deciding whether to retry.
+          Atomic database transactions alone do not make an external charge and a local order update atomic.
+        </p>
+      </div>
+      <p>
+        When a database update must reliably cause a later job, an outbox can record both the change
+        and the intent to publish in one database transaction. Another worker publishes that intent
+        after a restart if necessary. The consumer still needs duplicate-safe processing; see
+        <a href="10-background-jobs.html">background job reliability</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Finish transaction owners before closing their client pool; do not shut down a shared database.</li>
+        <li>Disconnects can leave the client uncertain about a committed operation without corrupting the database.</li>
+        <li>Use durable operation state, idempotency and reconciliation across retries and restarts.</li>
+      </ul></div>
+
+      <h2>Background workers and queued jobs</h2>
+      <p>
+        A worker must stop claiming new jobs before it waits for active jobs to finish. Keep its broker,
+        database and external-service clients available while those jobs need them. A task may need the
+        database to save its result and the broker to acknowledge completion; closing either too early
+        turns a planned shutdown into an avoidable failure.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Job state</th><th>Shutdown behavior</th></tr></thead>
+        <tbody>
+          <tr><td>Still waiting in a durable queue</td><td>Leave it available for healthy workers; do not empty the shared queue.</td></tr>
+          <tr><td>Running and able to finish in time</td><td>Finish, persist the result and acknowledge according to the queue's protocol.</td></tr>
+          <tr><td>Running beyond the drain allowance</td><td>Cancel cooperatively, checkpoint if supported and arrange safe redelivery.</td></tr>
+          <tr><td>Completed but acknowledgement lost</td><td>Expect possible redelivery and recognize work already completed.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Acknowledging before successful processing risks losing work. A lease or visibility timeout
+        may let another worker retry a job after the original worker disappears. Do not make a job
+        available to another worker while the old handler can still mutate shared state unless your
+        concurrency controls and idempotency make that safe.
+      </p>
+      <p>
+        Stop local recurring schedulers too. For work that cannot fit into any practical shutdown
+        window, design resumable chunks or a durable handoff. An in-memory “fire and forget” task has
+        no automatic recovery just because the HTTP response was already sent.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Stop job intake, then drain active handlers while their dependencies remain available.</li>
+        <li>Acknowledge successful durable work and expect redelivery when completion is uncertain.</li>
+        <li>Long jobs need cancellation or resumability, and retries need idempotency.</li>
+      </ul></div>
+
+      <h2>WebSockets, streams and long-lived work</h2>
+      <p>
+        Some connections are designed to stay open for hours. Waiting for every WebSocket or streaming
+        response to end naturally would make shutdown impractical. These protocols need a deliberate
+        closing and reconnect strategy rather than the same expectations as a short HTTP request.
+      </p>
+      <ul>
+        <li><strong>WebSockets:</strong> stop accepting new sessions, notify existing peers through the protocol's close procedure and bound the wait for completion.</li>
+        <li><strong>Server-sent events:</strong> end the stream deliberately and let the client reconnect; retain replay information if the application promises resumable delivery.</li>
+        <li><strong>Long downloads or uploads:</strong> choose whether to finish within a deadline or interrupt with a documented resume/retry mechanism.</li>
+        <li><strong>Detached tasks:</strong> register their lifetime with the application so shutdown can wait, cancel or hand them off.</li>
+      </ul>
+      <p>
+        A replacement instance needs access to the durable state required to resume a session.
+        Closing a socket does not transfer subscriptions, unacknowledged messages or an upload's
+        progress to another server. Clients should reconnect with backoff and jitter so a deployment
+        does not make every client reconnect at precisely the same instant.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Long-lived connections need a bounded protocol-specific close procedure.</li>
+        <li>Reconnection and resumability require explicit client behavior and shared durable state.</li>
+        <li>Track detached work independently of ordinary HTTP request draining.</li>
+      </ul></div>
+
+      <h2>Clean up in dependency order</h2>
+      <p>
+        Resource cleanup includes closing files and clients, completing protocol handshakes, releasing
+        owned leases, removing temporary files and flushing buffered output. During normal operation,
+        forgotten file descriptors or sockets can exhaust process limits. At process exit the operating
+        system reclaims memory and descriptors, but it cannot finish application-level business work or
+        flush data that existed only in a user-space buffer.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Dependencies must outlive their users</div>
+        <pre><code>HTTP handlers ----&gt; database pool
+       |                  ^
+       v                  |
+queue producer      background workers ----&gt; broker client
+
+Stop new requests and job claims
+        ↓
+Wait for handlers and workers to finish
+        ↓
+Close clients and pools they used
+        ↓
+Flush remaining telemetry, then exit</code></pre>
+      </div>
+      <p>
+        Reverse initialization order is useful when initialization followed dependency order.
+        The stronger rule is <strong>stop a resource's users before closing the resource</strong>.
+        “Close HTTP, then database, then workers” is wrong when workers still need that database.
+        Independent resources can be closed concurrently if their cleanup has no dependencies on one another.
+      </p>
+      <p>
+        Clean up only resources this instance owns. Closing a Redis client does not mean clearing
+        shared caches, deleting shared queue data or releasing another instance's lock. Keep diagnostic
+        output available while cleanup runs. If one cleanup operation fails, record it and attempt
+        independent remaining cleanup within the budget instead of silently abandoning everything.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Stop all users of a dependency before closing that dependency.</li>
+        <li>The OS reclaims process resources, but application cleanup still matters for buffers, protocols and durable work.</li>
+        <li>Release only owned resources and preserve diagnostics through cleanup.</li>
+      </ul></div>
+
+      <h2>A practical framework walkthrough</h2>
+      <p>
+        Framework helpers perform pieces of shutdown; your application coordinates them.
+        The following is <strong>pseudocode</strong>, showing responsibilities rather than a runnable
+        implementation for a particular framework. Every wait and cleanup operation must respect its
+        assigned share of the remaining deadline.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Conceptual lifecycle coordinator</div>
+        <pre><code>initialize configuration and dependencies
+register stop notifications
+start HTTP service, workers and schedulers
+publish readiness
+
+wait for stop notification or fatal startup/runtime failure
+enter draining once; establish overall shutdown deadline
+withdraw readiness and coordinate routing cutoff
+stop new HTTP work, job claims and scheduler triggers
+notify long-lived sessions that the instance is closing
+
+wait for active work within its drain allowance
+if work remains:
+    request cancellation and wait a bounded time for it to settle
+    record unfinished work and apply the documented forced-stop policy
+
+after users of a resource have stopped:
+    close that owned resource within the remaining cleanup budget
+flush telemetry within its reserved allowance
+exit with the recorded outcome</code></pre>
+      </div>
+      <p>
+        In Go, <a href="https://pkg.go.dev/os/signal#NotifyContext"><code>signal.NotifyContext</code></a>
+        can notify the coordinator by cancelling a context when a registered signal arrives. Use a
+        separate, fresh timeout context for shutdown. The returned stop function unregisters the signal
+        behavior; deciding whether later interrupts force an exit is part of your signal policy.
+      </p>
+      <p>
+        <a href="https://pkg.go.dev/net/http#Server.Shutdown"><code>http.Server.Shutdown</code></a>
+        closes listeners and idle connections, then waits for active connections to become idle.
+        Its context bounds that wait. An expired context returns an error; it does not itself force
+        all remaining handlers to stop. WebSockets and other hijacked connections require separate
+        handling. Also, <code>ListenAndServe</code> returns <code>http.ErrServerClosed</code> when
+        shutdown begins, so the main function must wait for shutdown to finish instead of exiting then.
+      </p>
+      <p>
+        <a href="https://pkg.go.dev/database/sql#DB.Close"><code>sql.DB.Close</code></a>
+        prevents new queries through that handle and waits for queries already processing. It has no
+        context parameter, so query deadlines and the surrounding shutdown policy still matter.
+        Call it after HTTP handlers and workers no longer need the pool. Check the worker library's
+        own drain, timeout and retry semantics rather than assuming its close method covers every resource.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use framework helpers inside one application-level lifecycle coordinator.</li>
+        <li>In Go, wait for Shutdown to finish even after ListenAndServe returns ErrServerClosed.</li>
+        <li>Deadline expiry, WebSockets, worker lifetimes and dependency cleanup need explicit policies.</li>
+      </ul></div>
+
+      <h2>Observe the shutdown itself</h2>
+      <p>
+        Shutdown deserves the same <a href="14-observability.html">logging and monitoring</a> as
+        normal request handling. Otherwise, a stuck deployment may reveal only that a process vanished.
+        Record the stop reason, deployment or instance identifier, active request and job counts,
+        stage durations and whether the deadline was exceeded.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Illustrative lifecycle log sequence</div>
+        <pre><code>shutdown_started        reason=SIGTERM active_requests=4 active_jobs=1
+work_intake_stopped      readiness=false
+http_drain_completed    active_requests=0
+worker_drain_completed  active_jobs=0
+dependencies_closed
+shutdown_completed      outcome=graceful duration_ms=1840</code></pre>
+      </div>
+      <p>
+        If the deadline expires, record unfinished counts and the affected stage rather than reporting
+        a graceful success. Compare shutdown duration and forced-termination frequency across deployments.
+        Keep fields bounded in metrics, and keep credentials, payment details and request payloads out
+        of logs. A telemetry exporter needs a timeout too; a broken logging service must not hang exit forever.
+      </p>
+      <p>
+        Report success or failure through the application's documented exit-code policy. Avoid an
+        immediate exit call before asynchronous cleanup and telemetry flushing complete. A final log
+        line is useful evidence, but successful shutdown also needs confirmation that the process actually exited.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Log the stop reason, stage durations, remaining work and final outcome.</li>
+        <li>Distinguish graceful completion from timeout or forced termination.</li>
+        <li>Keep telemetry available through cleanup, then flush it within a bounded window.</li>
+      </ul></div>
+
+      <h2>Verify shutdown under real work</h2>
+      <p>
+        Pressing Ctrl+C on an idle local server proves little about its behavior during a deployment.
+        Test with controlled traffic and an isolated environment using the same supervisor or container
+        entrypoint as production. The useful assertion is what happens to accepted work and new traffic,
+        not merely whether a “shutting down” message appears.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Scenario</th><th>What to verify</th></tr></thead>
+        <tbody>
+          <tr><td>Stop during a slow but bounded request</td><td>The accepted request completes; new traffic goes to healthy instances.</td></tr>
+          <tr><td>A dependency hangs</td><td>The overall deadline holds, cancellation is attempted and the outcome is recorded honestly.</td></tr>
+          <tr><td>Keep-alive, HTTP/2 or WebSocket traffic</td><td>New work stops correctly and long-lived connections follow their close policy.</td></tr>
+          <tr><td>A worker still needs the database</td><td>Its result and acknowledgement complete before shared clients close.</td></tr>
+          <tr><td>Repeated stop signals</td><td>Cleanup is not started twice and the shutdown budget does not restart.</td></tr>
+          <tr><td>Startup fails after opening a pool</td><td>Only acquired resources are released; the instance never becomes ready.</td></tr>
+          <tr><td>Commit or payment succeeds but response is lost</td><td>A retry resolves the existing operation without duplicating its effect.</td></tr>
+          <tr><td>Forced termination before cleanup</td><td>Durable jobs and application state recover without relying on shutdown hooks.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Revisit these checks when adding a worker, a new connection type or another resource owner.
+        A shutdown sequence that was correct for one HTTP server may become incorrect after a background
+        service starts using its database pool. Graceful shutdown remains reliable only when it follows
+        the application's actual work and dependencies.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Test shutdown during active requests and jobs, through the real deployment entrypoint.</li>
+        <li>Exercise deadlines, repeated signals, partial startup and protocol-specific connections.</li>
+        <li>Verify abrupt-exit recovery and duplicate-safe retries as well as the graceful path.</li>
+      </ul></div>
+    </div>
+
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; a study guide for curious engineers.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+
+</div>
+
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</dialog>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>

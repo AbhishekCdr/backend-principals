@@ -104,6 +104,38 @@
       blurb: 'Detect failures, contain their impact and recover safely without exposing sensitive data.',
       outcomes: ['Recognize logic, database, dependency, validation and configuration failures.', 'Choose health checks, bounded retries, containment and recovery strategies.', 'Propagate errors into consistent HTTP responses and safe diagnostic logs.'],
       tags: ['error handling', 'fault tolerance', 'logic errors', 'invariants', 'database errors', 'connection pools', 'constraints', 'deadlocks', 'external services', 'timeouts', 'validation', 'configuration', 'health checks', 'liveness', 'readiness', 'startup', 'monitoring', 'observability', 'retries', 'exponential backoff', 'jitter', 'idempotency', 'circuit breaker', 'bulkheads', 'backpressure', 'graceful degradation', 'recovery', 'runbooks', 'backups', 'RPO', 'RTO', 'error propagation', 'global error handler', 'middleware', 'HTTP status codes', 'correlation ID', 'account enumeration', 'OWASP', 'logging', 'redaction']
+    },
+    {
+      num: '13',
+      slug: '13-configuration',
+      title: 'Configuration Management',
+      blurb: 'Organize, validate and safely change the settings that control backend behavior.',
+      outcomes: ['Classify settings and choose environment variables, files or remote stores.', 'Resolve configuration precedence and validate values before startup.', 'Manage environment differences, feature flags, runtime updates and secret rotation.'],
+      tags: ['configuration', 'config management', 'settings', 'environment variables', 'process.env', 'dotenv', '.env', 'JSON', 'YAML', 'TOML', 'secrets', 'Vault', 'Consul', 'etcd', 'AWS Parameter Store', 'AWS Secrets Manager', 'Azure Key Vault', 'Google Secret Manager', 'precedence', 'defaults', 'validation', 'Zod', 'go-playground', 'startup', 'development', 'test', 'staging', 'production', 'connection pools', 'timeouts', 'feature flags', 'A/B testing', 'rollout', 'OpenFeature', 'Kubernetes', 'ConfigMap', 'runtime updates', 'configuration drift', 'least privilege', 'rotation']
+    },
+    {
+      num: '14',
+      slug: '14-observability',
+      title: 'Logging, Monitoring & Observability',
+      blurb: 'Connect logs, metrics and traces to detect problems and investigate backend behavior.',
+      outcomes: ['Design useful structured logs, severity policies and metrics with bounded labels.', 'Trace request and background-work relationships through instrumentation and context propagation.', 'Connect telemetry pipelines, dashboards and alerts while managing privacy, sampling and overhead.'],
+      tags: ['logging', 'monitoring', 'observability', 'telemetry', 'structured logs', 'JSON logs', 'log levels', 'debug', 'info', 'warn', 'error', 'fatal', 'slog', 'metrics', 'counter', 'gauge', 'histogram', 'percentiles', 'latency', 'throughput', 'error rates', 'cardinality', 'labels', 'traces', 'spans', 'context propagation', 'traceparent', 'request ID', 'trace ID', 'instrumentation', 'OpenTelemetry', 'Collector', 'Prometheus', 'Grafana', 'Loki', 'Jaeger', 'Alloy', 'Promtail', 'ELK', 'New Relic', 'Datadog', 'APM', 'dashboards', 'alerts', 'SLI', 'SLO', 'sampling', 'retention', 'privacy', 'redaction']
+    },
+    {
+      num: '15',
+      slug: '15-graceful-shutdown',
+      title: 'Graceful Shutdown',
+      blurb: 'Drain accepted work, release resources in dependency order and exit within a deadline.',
+      outcomes: ['Explain process life cycles and how SIGTERM, SIGINT and SIGKILL affect shutdown.', 'Coordinate request draining, worker completion, deadlines and resource cleanup.', 'Verify deployment behavior, transaction outcomes and recovery after interrupted work.'],
+      tags: ['graceful shutdown', 'process lifecycle', 'signals', 'SIGTERM', 'SIGINT', 'SIGKILL', 'Ctrl+C', 'termination', 'connection draining', 'in-flight requests', 'HTTP', 'keep-alive', 'HTTP/2', 'WebSocket', 'SSE', 'readiness', 'liveness', 'load balancer', 'service discovery', 'deployment', 'Kubernetes', 'preStop', 'PM2', 'supervisor', 'Docker', 'PID 1', 'grace period', 'deadline', 'timeout', 'cancellation', 'resource cleanup', 'dependency order', 'database connections', 'transactions', 'connection pool', 'background jobs', 'workers', 'queue', 'idempotency', 'outbox', 'reconciliation', 'Go', 'NotifyContext', 'Server.Shutdown', 'ErrServerClosed', 'telemetry']
+    },
+    {
+      num: '16',
+      slug: '16-security',
+      title: 'Backend Security',
+      blurb: 'Protect trust boundaries with safe queries, secure credentials and consistent access checks.',
+      outcomes: ['Recognize injection risks and separate untrusted data from executable structure.', 'Protect passwords, sessions and tokens while enforcing object, tenant and function permissions.', 'Distinguish XSS, CSRF and CORS defenses, and verify security through configuration, tests and audit evidence.'],
+      tags: ['security', 'trust boundaries', 'defense in depth', 'SQL injection', 'parameterized queries', 'prepared statements', 'NoSQL injection', 'MongoDB', 'mass assignment', 'command injection', 'argument injection', 'authentication', 'authorization', 'OAuth', 'OpenID Connect', 'account linking', 'password hashing', 'salt', 'rainbow tables', 'Argon2id', 'bcrypt', 'scrypt', 'PBKDF2', 'work factor', 'sessions', 'entropy', 'CSPRNG', 'session fixation', 'cookies', 'HttpOnly', 'Secure', 'SameSite', 'JWT', 'claims', 'signature', 'revocation', 'refresh tokens', 'rotation', 'localStorage', 'rate limiting', 'credential stuffing', 'password spraying', 'MFA', 'passkeys', 'BOLA', 'IDOR', 'BFLA', 'tenant isolation', 'RBAC', 'default deny', 'UUID', 'XSS', 'sanitization', 'Markdown', 'CSP', 'CSRF', 'CORS', 'origin', 'secrets', 'security headers', 'HSTS', 'clickjacking', 'audit logs', 'OWASP', 'PortSwigger']
     }
   ];
 

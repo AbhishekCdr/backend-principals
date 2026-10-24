@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logging, Monitoring &amp; Observability &middot; Backend Principles</title>
+<meta name="description" content="Backend logging, monitoring and observability: structured logs, severity, metrics, labels, traces, context propagation, OpenTelemetry, collection pipelines, alerts, sampling and safe telemetry.">
+<script>
+  (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try {
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell">
+
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 14</p>
+      <h1>Logging, Monitoring &amp; Observability</h1>
+      <p class="lead">
+        Understand what your backend is doing by connecting <strong>events, measurements and request paths</strong>.
+        Use logs, metrics and traces to detect trouble, investigate its causes and verify recovery.
+      </p>
+    </header>
+
+    <div class="prose">
+      <h2>Three related practices</h2>
+      <p>
+        A request can cross a load balancer, an API instance, a database and an external service.
+        Other work continues in background workers. Watching one terminal cannot explain what happened
+        across all of these components, especially when traffic is spread across instances and regions.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Practice</th><th>Purpose</th><th>Example question</th></tr></thead>
+        <tbody>
+          <tr><td>Logging</td><td>Record selected events with useful context.</td><td>Why did this attempt to create a to-do fail?</td></tr>
+          <tr><td>Monitoring</td><td>Track system behavior over time and detect important changes.</td><td>Are request failures or database waits increasing?</td></tr>
+          <tr><td>Observability</td><td>Make internal behavior understandable through the evidence the system exposes.</td><td>Which users, routes and dependencies are affected, and what explains the change?</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Logs, metrics and traces are common <strong>telemetry signals</strong>, often called the three
+        pillars of observability. They complement one another, but collecting all three does not
+        automatically make a system understandable. Good instrumentation, context and questions matter
+        more than checking off a list of products. Other evidence, such as profiles and deployment
+        history, can also be useful. See the <a href="https://opentelemetry.io/docs/concepts/observability-primer/">OpenTelemetry observability primer</a>.
+      </p>
+      <p>
+        Monitoring can help diagnose problems as well as detect them, and observability does not
+        promise an automatic root-cause answer. Improve coverage around the user journeys and failure
+        modes that matter most, then use incidents to discover what evidence is missing.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Logging records events; monitoring tracks behavior; observability helps explain the system's internal state.</li>
+        <li>Logs, metrics and traces are complementary signals, not a guarantee of complete understanding.</li>
+        <li>Start with important operational questions and improve coverage as you learn.</li>
+      </ul></div>
+
+      <h2>From an alert to an investigation</h2>
+      <p>
+        Imagine that creating to-dos becomes slow after a deployment. A useful investigation connects
+        an aggregate symptom to representative requests, then checks whether the proposed explanation
+        fits the broader pattern.
+      </p>
+      <ol>
+        <li><strong>Notice the symptom.</strong> An alert reports elevated latency or failed requests for the production to-do API.</li>
+        <li><strong>Narrow the scope.</strong> Compare routes, instances, regions and deployment versions over the same time window.</li>
+        <li><strong>Inspect events.</strong> Relevant logs show database pool acquisition timeouts, with request and trace identifiers.</li>
+        <li><strong>Follow a request.</strong> A trace shows a long wait before database work begins, while other spans remain short.</li>
+        <li><strong>Check the explanation.</strong> Pool-use metrics and recent changes help distinguish excessive concurrency from slow queries or leaked connections.</li>
+        <li><strong>Verify recovery.</strong> After mitigation, check both request performance and successful business operations.</li>
+      </ol>
+      <p>
+        A dashboard can link these signals when identifiers, timestamps and data-source integrations
+        are configured. Metrics may link to an example trace through an <strong>exemplar</strong>,
+        or you may search logs by service and time. An aggregate metric does not inherently contain
+        every related log, and a log's trace may be missing because it was not retained or sampled.
+      </p>
+      <p>
+        A slow span narrows the investigation; it does not by itself prove the root cause. Confirm
+        hypotheses with dependency metrics, query plans, profiles or additional evidence as needed.
+        The recovery decisions still follow the principles in <a href="12-error-handling.html">Error Handling &amp; Fault Tolerance</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Move from an aggregate symptom to affected components and representative requests.</li>
+        <li>Correlated signals need shared identifiers, consistent time windows and configured integrations.</li>
+        <li>Use evidence to test a cause and verify the outcome after mitigation.</li>
+      </ul></div>
+
+      <h2>Log events that answer questions</h2>
+      <p>
+        A log is a record of an event at a particular time. Useful events include startup, shutdown,
+        configuration rejection, important business outcomes, dependency failures and security-related
+        decisions. Logging every statement or every intermediate value creates volume without necessarily
+        making the application easier to understand.
+      </p>
+      <p>
+        Prefer stable event names with separate fields. A request-completion event can identify the
+        service, environment, route template, method, status, duration and request ID. A business event
+        can describe a successfully committed operation. Add trace and span IDs when an active tracing
+        context is available.
+      </p>
+      <p>
+        Decide exactly what an event means. “To-do created” should not be emitted before a transaction
+        commits if that transaction can still roll back. A request accepted for background processing
+        is different from a job completed. Where proof of a business action is required, design a
+        durable audit record; ordinary application logs may be sampled, dropped or retained briefly.
+      </p>
+      <p>
+        Choose a clear owner for each important outcome so one exception does not generate the same
+        full stack trace in the repository, service and HTTP handler. Lower layers can add meaningful
+        context while the final boundary records the request failure. Diagnostic detail belongs at
+        the level where it helps explain the operation.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Log meaningful lifecycle, business and failure events with stable names and useful fields.</li>
+        <li>Make event wording reflect what actually completed, including transaction or job state.</li>
+        <li>Avoid duplicate noise and distinguish diagnostic logs from durable audit records.</li>
+      </ul></div>
+
+      <h2>Severity levels and filtering</h2>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Level</th><th>Typical intent</th><th>Example</th></tr></thead>
+        <tbody>
+          <tr><td>Debug</td><td>Detailed diagnostic information.</td><td>A safe description of a branch decision during troubleshooting.</td></tr>
+          <tr><td>Info</td><td>Normal, meaningful operation.</td><td>The server became ready or an important business action completed.</td></tr>
+          <tr><td>Warn</td><td>A notable condition that may need attention.</td><td>A dependency failed temporarily and a controlled fallback is in use.</td></tr>
+          <tr><td>Error</td><td>An operation failed unexpectedly or needs investigation.</td><td>A database failure prevented a valid request from completing.</td></tr>
+          <tr><td>Fatal, where supported</td><td>A condition prevents the process from continuing safely.</td><td>Required startup initialization cannot complete.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        A configured threshold of info commonly includes info, warn and error while excluding debug.
+        Production often starts at info; a scoped, temporary debug setting can help during an incident.
+        More verbose logging still needs redaction and a volume budget. Development logs are not
+        exempt from secret-handling rules.
+      </p>
+      <p>
+        Do not label every invalid form or unauthenticated request as an application error. Use a
+        consistent policy for expected rejections and monitor unusual patterns separately. An
+        authentication attack can matter even when each individual rejection is working correctly.
+      </p>
+      <p>
+        Level names and behavior depend on the logger. A severity value alone does not restart the
+        application. Some fatal logging methods terminate the process; others only record a high
+        severity. Restarting depends on supervision and deployment policy. Go's standard slog package
+        defines debug, info, warn and error, rather than a built-in fatal operation.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Choose severity according to operational meaning and use thresholds deliberately.</li>
+        <li>Expected client rejections are different from unexpected server failures.</li>
+        <li>Check the logger's fatal behavior; severity and process supervision are separate concerns.</li>
+      </ul></div>
+
+      <h2>Structured logging and readable output</h2>
+      <p>
+        Structured logging keeps event fields separate so tools can query them reliably. JSON is a
+        common representation, but structure and destination are different choices: a process can
+        write JSON to standard output, where an agent collects it. Console output does not necessarily
+        mean unstructured logging.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Illustrative request-completion event</div>
+        <pre><code data-example="json">{
+  "timestamp": "2026-10-18T09:30:00Z",
+  "level": "info",
+  "event": "http.request.completed",
+  "service": "todo-api",
+  "environment": "production",
+  "method": "POST",
+  "route": "/todos",
+  "status": 201,
+  "duration_ms": 42,
+  "request_id": "req-example-1",
+  "trace_id": "8b31c6e439224e89a182be463dd96f20",
+  "span_id": "2079ac680ad52ef1"
+}</code></pre>
+      </div>
+      <p>
+        Keep field names and types consistent. Numeric duration fields are easier to aggregate than
+        messages containing “42ms,” and a route template avoids parsing user-specific paths. A formatter
+        can display the same structured events readably during development; you do not need to discard
+        structure to make local output convenient.
+      </p>
+      <h3>A small Go logging fragment</h3>
+      <p>
+        With <code>log/slog</code> and <code>os</code> imported, this fragment constructs a logger with
+        common service fields. It illustrates formatting and filtering, not a complete application or
+        a connection to a telemetry backend.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Go standard-library logger</div>
+        <pre><code data-example="go">options := &amp;slog.HandlerOptions{Level: slog.LevelInfo}
+logger := slog.New(slog.NewJSONHandler(os.Stdout, options)).With(
+    "service", "todo-api",
+    "environment", "production",
+)
+logger.Info("server.started", "port", 8080)</code></pre>
+      </div>
+      <p>
+        A TextHandler can present text output, and LevelDebug allows more diagnostic events. Neither
+        automatically adds a trace ID: supply correlation fields through your logging integration.
+        See the <a href="https://pkg.go.dev/log/slog">slog documentation</a> for handler and level behavior.
+        Plain text can also be collected and parsed, but a deliberate field schema reduces brittle extraction.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Separate log structure, display format and collection destination.</li>
+        <li>Use stable fields and types; readable development output can preserve structure.</li>
+        <li>A logger formats records; collection and trace correlation require additional setup.</li>
+      </ul></div>
+
+      <h2>Metrics: counts, current state and distributions</h2>
+      <p>
+        Metrics describe behavior numerically over time. Choose a measure with a clear definition,
+        unit and scope: requests per second, current pool usage, completed to-dos or a distribution
+        of request durations. A dashboard label such as “errors” is ambiguous unless you know what it counts.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Instrument</th><th>Meaning</th><th>Example</th></tr></thead>
+        <tbody>
+          <tr><td>Counter</td><td>Accumulates events; may reset when a process restarts.</td><td>Total requests or committed to-do creations. Use changes over time to calculate rates.</td></tr>
+          <tr><td>Gauge</td><td>Represents a current value that can rise or fall.</td><td>Active requests, queue depth, memory usage or connections in use.</td></tr>
+          <tr><td>Histogram</td><td>Records a distribution of observations.</td><td>Request durations or response sizes, supporting counts, averages and estimated percentiles.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        These are common choices; metric systems also offer other instruments, such as summaries.
+        See <a href="https://prometheus.io/docs/concepts/metric_types/">Prometheus metric types</a>.
+        A count of completed operations is not the same as the number of operations currently active.
+      </p>
+      <h3>Define success and failure correctly</h3>
+      <p>
+        <strong>Statuses greater than 200 are not all failures.</strong> Responses such as 201 Created
+        and 204 No Content are successful. Redirects have their own meaning; 4xx responses often
+        represent client rejection; 5xx responses indicate server failure. Track these separately,
+        and define business success explicitly. A 200 response can still carry an incorrect business result.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>An illustrative five-minute server-error ratio</div>
+        <pre><code>5xx responses in the window / all eligible requests in the same window
+
+Example: 20 / 1,000 = 0.02 = 2%</code></pre>
+      </div>
+      <p>
+        Keep numerator and denominator aligned by service, environment, time and exclusions. Define
+        what happens with no traffic or missing data instead of interpreting absence as zero errors.
+        A latency average can hide slow users, so also inspect percentiles such as p95 or p99.
+        Aggregate compatible distributions before calculating a fleet percentile; averaging individual
+        instances' p95 values does not give the fleet p95.
+        See <a href="https://prometheus.io/docs/practices/histograms/">histograms and summaries</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use counters for accumulated events, gauges for current state and distributions for latency.</li>
+        <li>Define error ratios precisely; 201 and 204 are successes, and empty data is not proof of health.</li>
+        <li>Inspect tail latency and aggregate distributions instead of averaging percentiles.</li>
+      </ul></div>
+
+      <h2>Metric labels and cardinality</h2>
+      <p>
+        Labels distinguish useful dimensions of a metric, such as service, environment, method,
+        route template and status class. Every distinct label combination creates another time
+        series. This number of combinations is called <strong>cardinality</strong>, and it affects
+        memory, storage, ingestion cost and query performance.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Usually manageable</th><th>Usually unsuitable for metric labels</th></tr></thead>
+        <tbody>
+          <tr><td>Route template: /todos/{id}</td><td>Raw path containing a different ID for every request.</td></tr>
+          <tr><td>Known status class or operation name.</td><td>Arbitrary exception text or user-supplied values.</td></tr>
+          <tr><td>A bounded priority enum.</td><td>User IDs, request IDs, trace IDs, email addresses or to-do titles.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Put per-request identifiers in appropriately protected logs or trace records when needed,
+        rather than in ordinary metric dimensions. Even bounded dimensions multiply when combined,
+        so assess the total across instances and histogram buckets. Treat unmatched routes as a
+        bounded category instead of giving each unknown path a new label.
+        See <a href="https://prometheus.io/docs/practices/instrumentation/#do-not-overuse-labels">Prometheus guidance on label cardinality</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Each distinct metric label set costs another time series.</li>
+        <li>Prefer bounded categories and route templates over IDs, raw paths and arbitrary text.</li>
+        <li>Use logs or traces for detailed request context while still applying privacy controls.</li>
+      </ul></div>
+
+      <h2>Traces and spans</h2>
+      <p>
+        A trace describes a related set of operations, often the journey of one request across
+        services. A <strong>span</strong> represents an operation with a start, an end and contextual
+        attributes. Child spans can show database calls, external requests or selected service work.
+        Different spans share a trace ID while retaining their own span IDs and relationships.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Illustrative trace — selected operations</div>
+        <pre><code>HTTP POST /todos                         42 ms
+├─ authenticate                           3 ms
+├─ todo.create                           31 ms
+│  └─ database.insert                    26 ms
+└─ response.serialize                     2 ms</code></pre>
+      </div>
+      <p>
+        Parent duration includes its children's work and other overhead. Parallel spans may overlap,
+        so adding every span's duration does not give elapsed request time. Trace viewers commonly
+        display a waterfall to make nesting and overlap visible. Only instrumented and collected
+        operations appear; the trace is not a recording of every executed line of code.
+        See <a href="https://opentelemetry.io/docs/concepts/signals/traces/">OpenTelemetry traces</a>.
+      </p>
+      <div class="callout callout--key">
+        <p class="callout-label">A trace is not an atomic transaction</p>
+        <p>
+          Some APM products call a top-level request a “transaction.” This describes a unit of
+          monitored work, not a database transaction with commit and rollback guarantees. Tracing
+          observes execution; it does not make multiple operations atomic.
+        </p>
+      </div>
+      <p>
+        Name spans after stable operations, not individual user content. Add useful, bounded attributes
+        and safe failure categories. A span that ends must also have its error status recorded where
+        appropriate; ending a span alone does not mean the operation succeeded.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>A trace connects operations; spans describe individual operations and their relationships.</li>
+        <li>Nested or overlapping span durations cannot simply be added to obtain total latency.</li>
+        <li>Tracing and an APM “transaction” provide visibility, not database atomicity.</li>
+      </ul></div>
+
+      <h2>Context propagation and correlation</h2>
+      <p>
+        Tracing needs context to follow work. HTTP instrumentation extracts supported incoming trace
+        context or starts a new trace, creates a server span and makes its context available to
+        downstream code. Service and repository calls use that context to create related spans.
+        Instrumented outgoing clients inject propagation headers for the next service.
+      </p>
+      <p>
+        W3C Trace Context commonly carries this relationship through headers such as
+        <code>traceparent</code>. In Go, request context is passed through <code>context.Context</code>;
+        other languages use their own context facilities. Use established instrumentation rather
+        than generating unrelated trace IDs at every layer.
+        See <a href="https://opentelemetry.io/docs/concepts/context-propagation/">OpenTelemetry context propagation</a>.
+      </p>
+      <p>
+        A request ID used in support reports and a distributed trace ID are different identifiers,
+        even if you record both. Trace context is also not authenticated identity: a client-controlled
+        header must not decide a user's permissions. Add identity-related metadata only after the
+        application has established the relevant identity and a legitimate need to record it.
+      </p>
+      <p>
+        For <a href="10-background-jobs.html">background jobs</a>, preserve selected propagation
+        metadata with the message. A worker can create a related span or a linked trace according to
+        the queue integration. Do not keep a request span open indefinitely for delayed work. Keep
+        secrets and unnecessary personal data out of propagated baggage, which may cross service boundaries.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Extract, carry and inject trace context through supported instrumentation.</li>
+        <li>Correlate logs with tracing identifiers without treating them as proof of user identity.</li>
+        <li>Connect asynchronous work deliberately and minimize data propagated to other services.</li>
+      </ul></div>
+
+      <h2>Instrumentation and OpenTelemetry</h2>
+      <p>
+        <strong>Instrumentation</strong> is the code or integration that emits measurements, events
+        and spans. Automatic integrations can capture supported HTTP and database operations. Manual
+        instrumentation adds business meaning, such as a to-do creation outcome or a workflow stage.
+        Neither approach removes the need to decide what questions the data should answer.
+      </p>
+      <p>
+        OpenTelemetry provides APIs, SDKs, conventions, instrumentation and transport mechanisms.
+        It is vendor-neutral and can send data to different backends. It is not itself a complete
+        long-term telemetry database or a dashboard. Language, library and signal support vary;
+        check the integration you actually use.
+      </p>
+      <ol>
+        <li><strong>API and instrumentation:</strong> application and library code describe telemetry events.</li>
+        <li><strong>SDK and exporter:</strong> configuration determines recording, processing, sampling and export.</li>
+        <li><strong>Collector, when used:</strong> receives, processes and forwards telemetry to configured destinations.</li>
+        <li><strong>Backend and interface:</strong> store, query, visualize and alert on the resulting data.</li>
+      </ol>
+      <p>
+        A Collector can batch, filter or redact data and route it to multiple destinations. It is
+        optional in some architectures, and collecting data does not make the application independent
+        of transport failures. Configure queue limits, retries and shutdown flushing deliberately.
+        See <a href="https://opentelemetry.io/docs/collector/">the OpenTelemetry Collector overview</a>.
+      </p>
+      <p>
+        Initialize supported instrumentation before the work it should observe. Avoid adding two
+        independent root-request instruments that duplicate spans or metrics. A proprietary agent
+        and OpenTelemetry may coexist through supported integrations, but their ownership and export
+        paths must be clear. The <a href="https://opentelemetry.io/docs/languages/go/instrumentation/">Go instrumentation guide</a>
+        shows the actual APIs behind these concepts.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Combine automatic technical coverage with selected manual business instrumentation.</li>
+        <li>Distinguish instrumentation, SDK/exporter, Collector and storage/dashboard responsibilities.</li>
+        <li>Configure one coherent telemetry path and avoid duplicate request instrumentation.</li>
+      </ul></div>
+
+      <h2>Instrumenting a create-to-do workflow</h2>
+      <p>
+        Follow the operation rather than memorizing a particular SDK. The HTTP layer owns the request
+        span, final status and request-duration metric. The service can add a child span for business
+        work, while supported repository instrumentation records database activity. The service ends
+        its own span, not the enclosing request span.
+      </p>
+      <div class="msg">
+        <div class="msg-head"><span class="dot"></span>Conceptual service flow — pseudocode, not an SDK API</div>
+        <pre><code>receive validated input and request context
+start a child span named "todo.create"
+attach a validated priority category if useful
+
+try:
+    create and commit the to-do through the repository
+    record the committed business outcome
+    emit a safe "todo.created" event with correlation IDs
+    return the created to-do
+on business-operation failure:
+    record a sanitized failure category on the span
+    mark the span as failed when appropriate
+    propagate the error to the request boundary
+always:
+    end this child span</code></pre>
+      </div>
+      <p>
+        Keep telemetry delivery failures separate from business-operation failures. A full exporter
+        buffer after a successful commit must not cause the application to claim that the to-do was
+        never created and encourage an unsafe repeat. Diagnostic event delivery needs its own bounded
+        failure policy; business-critical audit requirements need a stronger design.
+      </p>
+      <p>
+        Record expected validation rejection separately from an unexpected database failure. Do not
+        attach the user's to-do title or description by default: those fields can contain personal
+        information or secrets. Avoid recording raw SQL parameters or database error text without
+        reviewing and sanitizing them.
+      </p>
+      <p>
+        In a New Relic implementation, an agent's transaction and segment concepts can supply this
+        request and operation hierarchy. With OpenTelemetry, spans and context serve that role.
+        Follow the chosen integration's lifecycle and error APIs; recording an exception event and
+        setting span error status may be separate operations.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Let each layer own the spans and measurements appropriate to its responsibility.</li>
+        <li>End spans on all paths and describe committed outcomes, expected rejections and failures accurately.</li>
+        <li>Keep telemetry delivery failures and sensitive payloads out of the business success contract.</li>
+      </ul></div>
+
+      <h2>Collection pipelines and tool responsibilities</h2>
+      <p>
+        Writing a JSON event or starting a span does not make it appear in a dashboard. Configure
+        collection, transport, storage and querying. A possible architecture sends application
+        telemetry through agents or Collectors to backends, then connects dashboards and alerting
+        to those backends. Metrics can also be scraped from an endpoint at configured intervals.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Component</th><th>Typical role</th></tr></thead>
+        <tbody>
+          <tr><td><a href="https://prometheus.io/docs/concepts/metric_types/">Prometheus</a></td><td>Collect, store and query time-series metrics; applications and exporters provide the measurements.</td></tr>
+          <tr><td><a href="https://grafana.com/docs/grafana/latest/fundamentals/">Grafana</a></td><td>Query connected data sources, explore signals, build dashboards and configure alerting.</td></tr>
+          <tr><td><a href="https://grafana.com/docs/loki/latest/get-started/overview/">Loki</a></td><td>Store and query logs delivered by supported clients or collectors.</td></tr>
+          <tr><td><a href="https://www.jaegertracing.io/docs/latest/">Jaeger</a></td><td>Collect, store and explore distributed traces.</td></tr>
+          <tr><td>OpenTelemetry Collector or <a href="https://grafana.com/docs/alloy/latest/">Grafana Alloy</a></td><td>Receive and process telemetry, then forward it through configured pipelines.</td></tr>
+          <tr><td>Elasticsearch, Logstash and Kibana</td><td>A common combination for ingestion, indexed search and log exploration.</td></tr>
+          <tr><td><a href="https://docs.newrelic.com/docs/distributed-tracing/concepts/introduction-distributed-tracing/">New Relic</a> or <a href="https://docs.datadoghq.com/tracing/">Datadog</a></td><td>Integrated platforms for application monitoring, tracing and related telemetry investigation.</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout callout--note">
+        <p class="callout-label">An update to the lecture's tool list</p>
+        <p>
+          Promtail reached end of life on March 2, 2026. For new setups or migrations, use Grafana
+          Alloy or another supported collection client rather than treating Promtail as a current
+          default. See <a href="https://grafana.com/docs/loki/latest/send-data/promtail/">Grafana's Promtail notice</a>.
+        </p>
+      </div>
+      <p>
+        These products are composable options, not a mandatory stack. Operating separate services
+        gives control but requires upgrades, capacity planning and maintenance. A managed platform
+        can reduce that work while introducing its own costs, limits and data-handling considerations.
+        Evaluate existing team skills, integrations, volume and retention needs instead of assuming
+        either route is always simpler or cheaper.
+      </p>
+      <p>
+        Grafana is not the source of every metric, and Prometheus does not automatically discover
+        business outcomes hidden in application code. The instrumentation, collection and dashboard
+        layers have to agree on what is produced and how it is interpreted.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Connect instrumentation to collection, storage, exploration and alerting explicitly.</li>
+        <li>Choose a manageable set of tools with clear responsibilities rather than installing every product.</li>
+        <li>Promtail is end of life; use a supported telemetry collection path.</li>
+      </ul></div>
+
+      <h2>Dashboards and actionable alerts</h2>
+      <p>
+        Start dashboards with user-facing traffic, errors and latency, then add resource saturation
+        and dependency health. Database pool waits, queue age, CPU, memory and garbage-collection
+        behavior can explain why user experience is changing. Display service, environment and version
+        clearly so a staging experiment is not mistaken for a production incident.
+      </p>
+      <p>
+        Alert on conditions that justify action, with an owner, a useful time window and a runbook.
+        “Error rate above 80%” is an illustration, not a sensible universal threshold. Choose signals
+        and thresholds around the service's objectives, expected traffic and acceptable impact.
+        Include enough volume context to distinguish a sustained problem from one failed request.
+      </p>
+      <p>
+        A service-level indicator (SLI) measures a defined outcome, such as the fraction of eligible
+        requests completed successfully. A service-level objective (SLO) specifies the target over
+        a period. See <a href="https://sre.google/sre-book/service-level-objectives/">the SRE guide to service-level objectives</a>. Alerts can use these objectives to focus attention on user impact instead of
+        paging whenever a resource briefly changes. See <a href="https://sre.google/sre-book/monitoring-distributed-systems/">Google SRE's monitoring guidance</a>.
+      </p>
+      <h3>Freshness and absence are part of the dashboard</h3>
+      <p>
+        Scrape intervals, SDK batching, network queues, storage ingestion and dashboard refresh all
+        contribute delay. There is no universal ten- or fifteen-second freshness guarantee. Show
+        the selected time range and check ingestion lag before deciding that an event did not happen.
+        A blank chart may mean no traffic, a wrong filter or a broken telemetry pipeline.
+      </p>
+      <p>
+        Avoid pages for every expected 401 or invalid form. Monitor unusual authentication patterns
+        separately, and preserve visibility into genuine failures. Alert delivery is also a dependency:
+        test the notification route, escalation path and recovery notification in an appropriate test setup.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Connect request health, business outcomes and resource pressure in dashboards.</li>
+        <li>Give alerts meaningful thresholds, context, ownership and an action to take.</li>
+        <li>Understand collection delay and missing data; neither an empty chart nor a green panel proves complete health.</li>
+      </ul></div>
+
+      <h2>Privacy and safe telemetry</h2>
+      <p>
+        Telemetry may pass through collectors, storage services, dashboards and third-party platforms.
+        A field added to a span can be exposed just as easily as a field written to a log. Decide
+        what is necessary before capture, and apply the same care to events, attributes and propagated context.
+      </p>
+      <ul>
+        <li>Exclude passwords, API keys, authorization headers, session cookies and reset tokens.</li>
+        <li>Avoid full request bodies, raw query parameters and user-written titles or descriptions by default.</li>
+        <li>Use an opaque user ID only when needed; it still requires access controls and appropriate retention.</li>
+        <li>Review exception messages, database parameters and URLs for embedded credentials or personal data.</li>
+        <li>Encode fields safely so untrusted content cannot forge log entries or corrupt their structure.</li>
+      </ul>
+      <p>
+        Prefer an allowlist of safe fields and redact close to the source. Restrict telemetry access,
+        protect transport and storage, and define retention. Collector-side filtering can add protection,
+        but cannot undo a secret already written to an application log. The
+        <a href="12-error-handling.html">safe logging guidance in Lesson 12</a> applies across the whole pipeline.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Apply privacy rules to logs, spans, attributes and propagation, not just public API responses.</li>
+        <li>Capture only necessary fields and redact secrets before they leave the application.</li>
+        <li>Protect telemetry access, transport, storage and retention.</li>
+      </ul></div>
+
+      <h2>Sampling, retention and telemetry overhead</h2>
+      <p>
+        Recording more data has costs: application work, network traffic, collector capacity, storage
+        and investigation noise. Keep enough detail to answer important questions, with separate
+        policies for routine diagnostics and records that must be retained for a defined purpose.
+      </p>
+      <p>
+        <strong>Head sampling</strong> chooses whether to record a trace early, before its final
+        outcome is known. <strong>Tail sampling</strong> makes decisions after observing enough of
+        the trace to consider properties such as errors or duration. Tail sampling needs buffering
+        and suitable routing of related spans, and cannot recover spans already discarded upstream.
+        See <a href="https://opentelemetry.io/docs/concepts/sampling/">OpenTelemetry sampling</a>.
+      </p>
+      <p>
+        Sampled traces are examples, not automatically a complete request census. Prefer appropriate
+        aggregate instrumentation for traffic and error counts. If metrics are derived from spans,
+        understand where sampling occurs and how it affects those metrics. Different SDK and backend
+        pipelines can behave differently, as illustrated by <a href="https://docs.datadoghq.com/tracing/metrics/metrics_namespace/">Datadog's trace-metric documentation</a>.
+      </p>
+      <p>
+        Bound queues and export work so a telemetry outage does not exhaust application memory or
+        block every request. Monitor dropped records, export failures, ingestion lag and collector
+        health. Plan graceful flushing on shutdown, while recognizing that crashes can still lose
+        buffered diagnostic data. Sampling and retention settings belong in your
+        <a href="13-configuration.html">configuration management</a> policy.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Choose sampling and retention deliberately rather than assuming every request is stored forever.</li>
+        <li>Know whether metrics cover all eligible traffic or a sampled source.</li>
+        <li>Bound telemetry resource use and monitor the collection system's own failures.</li>
+      </ul></div>
+
+      <h2>Verify the workflow and share ownership</h2>
+      <p>
+        Instrumentation is unfinished until you verify its output. Use an isolated test environment
+        and representative operations to check the application, collection path and dashboard together.
+        Do not change a real deployment to “production mode” merely to make a demonstration visible;
+        configure an explicit test service and environment identity.
+      </p>
+      <ol>
+        <li><strong>Successful operation:</strong> create a to-do and confirm the success metric, event and expected span relationships.</li>
+        <li><strong>Expected rejection:</strong> call a protected route without credentials and confirm a 401, consistent classification and safe metadata.</li>
+        <li><strong>Controlled dependency failure:</strong> simulate a database failure and confirm the failure category, request outcome and trace context.</li>
+        <li><strong>Slow operation:</strong> introduce a controlled delay and check the duration signal and relevant span.</li>
+        <li><strong>Collection problem:</strong> interrupt a test exporter and verify bounded behavior, pipeline diagnostics and recovery.</li>
+      </ol>
+      <p>
+        If authentication rejects a request before it reaches the service, expect an HTTP/authentication
+        path, not a database span that never ran. Likewise, verify that each request is counted once
+        and that filtering or sampling explains any missing records. Check time ranges, environment
+        filters and ingestion status before declaring the integration broken.
+      </p>
+      <p>
+        Developers own useful events, operation semantics and context propagation. Platform teams
+        own reliable collection, storage, access and delivery. Both share naming conventions, dashboards,
+        alert policies and incident feedback. This is an engineering skill that improves through
+        practice; no product removes the need to understand what the measurements actually mean.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Verify successful, rejected, failed and slow operations across the complete telemetry path.</li>
+        <li>Check correlation, counting, privacy and pipeline failure behavior in a controlled environment.</li>
+        <li>Share ownership between application and platform teams and improve instrumentation from real questions.</li>
+      </ul></div>
+    </div>
+
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; a study guide for curious engineers.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+
+</div>
+
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</dialog>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>
