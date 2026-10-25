@@ -171,7 +171,7 @@ learning → D1, D3</code></pre>
         PostgreSQL calls normalized searchable forms <strong>lexemes</strong> and stores them in a
         <code>tsvector</code>. Its query representation is a <code>tsquery</code>. Elasticsearch uses
         field analyzers for indexed text and compatible search analysis for queries.
-        <a href="https://www.postgresql.org/docs/current/textsearch-intro.html">PostgreSQL text-search concepts</a>.
+        <a href="https://www.postgresql.org/docs/current/textsearch-intro.html" target="_blank" rel="noopener noreferrer">PostgreSQL text-search concepts <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Lowercasing an entire query string manually is not a substitute for using the correct
@@ -202,7 +202,7 @@ learning → D1, D3</code></pre>
       <p>
         BM25's <code>k1</code> controls term-frequency saturation and <code>b</code> controls length
         normalization. These are tuning parameters, not a reason to change defaults without evidence.
-        <a href="https://www.elastic.co/docs/reference/elasticsearch/index-settings/similarity">Elasticsearch similarity settings</a>.
+        <a href="https://www.elastic.co/docs/reference/elasticsearch/index-settings/similarity" target="_blank" rel="noopener noreferrer">Elasticsearch similarity settings <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <h3>The title is important because you say it is</h3>
       <p>
@@ -228,7 +228,7 @@ learning → D1, D3</code></pre>
         This default <code>multi_match</code> mode requires both terms within a matching field when
         <code>operator</code> is <code>and</code>. Combining words across separate fields requires a
         query mode designed for that behavior.
-        <a href="https://www.elastic.co/docs/reference/query-languages/query-dsl/query-dsl-multi-match-query">Multi-match behavior and boosts</a>.
+        <a href="https://www.elastic.co/docs/reference/query-languages/query-dsl/query-dsl-multi-match-query" target="_blank" rel="noopener noreferrer">Multi-match behavior and boosts <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         A relevance score is not a probability that a result is correct. Boosts, corpus statistics and
@@ -261,13 +261,13 @@ learning → D1, D3</code></pre>
         term matches; it does not understand every sentence or guarantee the intended correction.
         Excessive expansion can increase cost and introduce irrelevant results. Do not assume
         fuzzy matching is appropriate for exact identifiers such as order numbers.
-        <a href="https://www.elastic.co/docs/reference/query-languages/query-dsl/full-text-queries">Full-text query options</a>.
+        <a href="https://www.elastic.co/docs/reference/query-languages/query-dsl/full-text-queries" target="_blank" rel="noopener noreferrer">Full-text query options <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         For typeahead, Elasticsearch has a <code>search_as_you_type</code> field with supporting
         subfields, commonly queried with <code>multi_match</code> and <code>bool_prefix</code>.
         Choose the mapping and query together rather than wrapping each keystroke in leading wildcards.
-        <a href="https://www.elastic.co/docs/reference/elasticsearch/mapping-reference/search-as-you-type">Search-as-you-type fields</a>.
+        <a href="https://www.elastic.co/docs/reference/elasticsearch/mapping-reference/search-as-you-type" target="_blank" rel="noopener noreferrer">Search-as-you-type fields <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         In the UI, debounce rapid input, limit suggestion counts and ignore stale responses that
@@ -306,7 +306,7 @@ CREATE INDEX reviews_search_vector_idx
         The stored generated column keeps the vector synchronized when the review changes. GIN
         supports efficient lookup of matching lexemes. Explicitly selecting the language configuration
         makes the indexing behavior reproducible.
-        <a href="https://www.postgresql.org/docs/current/textsearch-tables.html">PostgreSQL text-search tables and indexes</a>.
+        <a href="https://www.postgresql.org/docs/current/textsearch-tables.html" target="_blank" rel="noopener noreferrer">PostgreSQL text-search tables and indexes <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="msg">
         <div class="msg-head"><span class="dot"></span>Query — bind the user's search text to $1</div>
@@ -326,7 +326,7 @@ LIMIT 20;</code></pre>
         <code>OR</code> and negation. <code>@@</code> tests a match; <code>ts_rank_cd</code> provides
         a ranking that considers proximity. These built-in ranks are not Elasticsearch's BM25 scores.
         The GIN index helps find matches; it does not directly provide the final rank order.
-        <a href="https://www.postgresql.org/docs/current/textsearch-controls.html">PostgreSQL query construction and ranking</a>.
+        <a href="https://www.postgresql.org/docs/current/textsearch-controls.html" target="_blank" rel="noopener noreferrer">PostgreSQL query construction and ranking <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Keep binding user values instead of interpolating SQL. The same English configuration is
@@ -364,7 +364,7 @@ LIMIT 20;</code></pre>
         substring contract without changing it into word-based search. Very short or broad patterns
         may provide too few useful trigrams to be selective. Similarity operators can also support
         typo-related features, with thresholds that need testing.
-        <a href="https://www.postgresql.org/docs/current/pgtrgm.html">PostgreSQL pg_trgm</a>.
+        <a href="https://www.postgresql.org/docs/current/pgtrgm.html" target="_blank" rel="noopener noreferrer">PostgreSQL pg_trgm <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Full-text and trigram indexes solve different problems. Add each only for the queries that
@@ -387,7 +387,7 @@ LIMIT 20;</code></pre>
         Elasticsearch builds on Apache Lucene: each Elasticsearch shard contains a Lucene index.
         PostgreSQL implements its own full-text facilities; it does not need Lucene to offer text
         search. Different products can use the same general inverted-index idea.
-        <a href="https://www.elastic.co/docs/deploy-manage/distributed-architecture/clusters-nodes-shards">Elasticsearch shards and Lucene</a>.
+        <a href="https://www.elastic.co/docs/deploy-manage/distributed-architecture/clusters-nodes-shards" target="_blank" rel="noopener noreferrer">Elasticsearch shards and Lucene <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="msg">
         <div class="msg-head"><span class="dot"></span>PUT /reviews — mapping for a new example index</div>
@@ -416,8 +416,8 @@ LIMIT 20;</code></pre>
         A text field is not “a string without discrimination”: its analysis is precisely what changes
         matching behavior. A keyword field does not infer synonyms or word forms. When one value
         needs both analyzed search and exact sorting, a text field can have a keyword subfield.
-        <a href="https://www.elastic.co/docs/reference/elasticsearch/mapping-reference/text">Text fields</a> and
-        <a href="https://www.elastic.co/docs/reference/elasticsearch/mapping-reference/keyword">keyword fields</a>.
+        <a href="https://www.elastic.co/docs/reference/elasticsearch/mapping-reference/text" target="_blank" rel="noopener noreferrer">Text fields <span role="img" aria-label="opens in a new tab">↗</span></a> and
+        <a href="https://www.elastic.co/docs/reference/elasticsearch/mapping-reference/keyword" target="_blank" rel="noopener noreferrer">keyword fields <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="msg">
         <div class="msg-head"><span class="dot"></span>PUT /reviews/_doc/1?refresh=wait_for — one example document</div>
@@ -473,7 +473,7 @@ LIMIT 20;</code></pre>
         configured spelling variation. The <code>term</code> filter matches the keyword sentiment
         value exactly. Filter clauses restrict eligibility without adding relevance score; the text
         clause contributes to <code>_score</code>.
-        <a href="https://www.elastic.co/docs/reference/query-languages/query-dsl/query-dsl-bool-query">Boolean queries and filter context</a>.
+        <a href="https://www.elastic.co/docs/reference/query-languages/query-dsl/query-dsl-bool-query" target="_blank" rel="noopener noreferrer">Boolean queries and filter context <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Results appear under <code>hits.hits</code>, with document IDs, scores and selected source
@@ -482,7 +482,7 @@ LIMIT 20;</code></pre>
         In <code>hits.total.relation</code>, <code>eq</code> means an exact count and <code>gte</code>
         means a lower bound. Also inspect <code>timed_out</code> and shard failures before treating
         the results as complete.
-        <a href="https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-search">Search response fields</a>.
+        <a href="https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-search" target="_blank" rel="noopener noreferrer">Search response fields <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <h3>Why not pass user input straight into query_string?</h3>
       <p>
@@ -491,7 +491,7 @@ LIMIT 20;</code></pre>
         expensive leading-wildcard searches and does not reproduce SQL substring semantics on an
         analyzed field. Prefer a query suited to the intended contract; expose advanced syntax only
         when deliberately supported and bounded.
-        <a href="https://www.elastic.co/docs/reference/query-languages/query-dsl/query-dsl-query-string-query">Query-string syntax and wildcard costs</a>.
+        <a href="https://www.elastic.co/docs/reference/query-languages/query-dsl/query-dsl-query-string-query" target="_blank" rel="noopener noreferrer">Query-string syntax and wildcard costs <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Use text queries for analyzed matching and keyword filters for exact conditions.</li>
@@ -527,7 +527,7 @@ LIMIT 20;</code></pre>
       <p>
         Elasticsearch search is near real time: an acknowledged write can need a refresh before it
         appears in search results. Delivery lag from the database and refresh delay are separate.
-        <a href="https://www.elastic.co/docs/manage-data/data-store/near-real-time-search">Near-real-time search</a>.
+        <a href="https://www.elastic.co/docs/manage-data/data-store/near-real-time-search" target="_blank" rel="noopener noreferrer">Near-real-time search <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Preserve a way to rebuild the index from authoritative data. Analyzer or mapping changes
@@ -565,7 +565,7 @@ LIMIT 20;</code></pre>
         Elasticsearch's Bulk API can return successful and failed items in the same response. Inspect
         each item and retry suitable failures; an HTTP success response alone does not mean every
         document was indexed.
-        <a href="https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-bulk">Elasticsearch Bulk API</a>.
+        <a href="https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-bulk" target="_blank" rel="noopener noreferrer">Elasticsearch Bulk API <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Equal counts are necessary but not sufficient: two collections can each contain 50,000
@@ -603,7 +603,7 @@ LIMIT 20;</code></pre>
         execution plans and Elasticsearch's <code>took</code> help diagnose server-side work, but
         are not interchangeable with end-to-end timing. A streamed UI can display each result as it
         arrives; streaming does not by itself make either query faster or prove the comparison is fair.
-        <a href="https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-search">Elasticsearch's took measurement</a>.
+        <a href="https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-search" target="_blank" rel="noopener noreferrer">Elasticsearch's took measurement <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Use a representative query set, repeated runs and stated concurrency. Report cold and warm
@@ -642,7 +642,7 @@ LIMIT 20;</code></pre>
       <p>
         ELK historically names <strong>Elasticsearch, Logstash and Kibana</strong>: search and analytics,
         ingestion and transformation, and exploration and visualization. Log analysis is one use of
-        the <a href="https://www.elastic.co/elastic-stack">Elastic Stack</a>, separate from building
+        the <a href="https://www.elastic.co/elastic-stack" target="_blank" rel="noopener noreferrer">Elastic Stack <span role="img" aria-label="opens in a new tab">↗</span></a>, separate from building
         a customer-facing product-search API.
       </p>
       <p>

@@ -111,7 +111,7 @@
         Tim Berners-Lee proposed the Web at CERN in 1989 and developed its first browser/editor and
         server in 1990. The Web is a system built on the Internet, not the beginning of the Internet
         itself. Its early development brought together resource identifiers, HTTP and HTML.
-        <a href="https://www.w3.org/History.html">W3C's history of the Web</a>.
+        <a href="https://www.w3.org/History.html" target="_blank" rel="noopener noreferrer">W3C's history of the Web <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         As the Web grew, shared interfaces, caching and intermediaries became essential to scaling it.
@@ -133,7 +133,7 @@
       <p>
         These constraints concern interactions across the system. REST's layered-system constraint
         is distinct from organizing application code into controllers, services and repositories.
-        <a href="https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm">Fielding's REST chapter</a>
+        <a href="https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm" target="_blank" rel="noopener noreferrer">Fielding's REST chapter <span role="img" aria-label="opens in a new tab">↗</span></a>
         explains the rationale and tradeoffs.
       </p>
       <div class="callout callout--note">
@@ -221,7 +221,7 @@
       <p>
         Underscores are legal URI characters, and encoded spaces can occur in URLs. Hyphenated
         lowercase names are a readability convention. Paths can be case-sensitive, so consistency
-        matters. <a href="https://www.rfc-editor.org/rfc/rfc3986.html#section-2.3">URI character rules</a>.
+        matters. <a href="https://www.rfc-editor.org/rfc/rfc3986.html#section-2.3" target="_blank" rel="noopener noreferrer">URI character rules <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Nesting can express relationships, but avoid paths that reproduce every level of the
@@ -265,7 +265,7 @@
         The choice follows the operation, not whether the frontend is a single-page or multi-page
         application. Query parameters are useful for GET selections; headers and the path also
         carry request information. Avoid relying on GET request bodies, which have no generally
-        defined semantics. <a href="https://www.rfc-editor.org/rfc/rfc9110.html#section-9">HTTP method semantics</a>.
+        defined semantics. <a href="https://www.rfc-editor.org/rfc/rfc9110.html#section-9" target="_blank" rel="noopener noreferrer">HTTP method semantics <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Method + path expresses the operation; collection URLs can support both GET and POST.</li>
@@ -296,7 +296,7 @@
         <p>“Set status to active” can have the same effect repeatedly. “Increase the estimate by one”
           changes the result on every call. The patch format and operation determine retry behavior;
           PATCH itself does not promise idempotency.
-          <a href="https://www.rfc-editor.org/rfc/rfc5789.html#section-2">PATCH specification</a>.</p>
+          <a href="https://www.rfc-editor.org/rfc/rfc5789.html#section-2" target="_blank" rel="noopener noreferrer">PATCH specification <span role="img" aria-label="opens in a new tab">↗</span></a>.</p>
       </div>
       <p>
         Logging a request does not make a safe read unsafe: safety concerns the effect requested by
@@ -386,7 +386,7 @@ Content-Type: application/merge-patch+json
         Arrays are replaced as a whole. Apply the schema and business rules to the resulting state:
         deleting a required name or changing a read-only ID should fail. Return the updated public
         representation with 200, or document 204 if the operation returns no content.
-        <a href="https://www.rfc-editor.org/rfc/rfc7396.html">JSON Merge Patch specification</a>.
+        <a href="https://www.rfc-editor.org/rfc/rfc7396.html" target="_blank" rel="noopener noreferrer">JSON Merge Patch specification <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <h3>Read and delete use the same resource address</h3>
       <p>
@@ -625,7 +625,7 @@ Content-Type: application/json
         <code>desc</code> in the next endpoint. This example uses camelCase for JSON fields and query
         parameter names. JSON itself only requires object member names to be strings; it does not
         mandate camelCase. Choose a convention and apply it consistently.
-        <a href="https://www.rfc-editor.org/rfc/rfc8259.html#section-4">JSON object syntax</a>.
+        <a href="https://www.rfc-editor.org/rfc/rfc8259.html#section-4" target="_blank" rel="noopener noreferrer">JSON object syntax <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="table-wrap"><table class="table">
         <thead><tr><th>Input</th><th>Example default</th><th>When the client supplies a value</th></tr></thead>
@@ -690,7 +690,7 @@ Content-Type: application/json
         Problem Details is a standard error representation. Its common fields describe the problem
         type, title, status and occurrence-specific detail; an API can add structured field errors
         and a request ID. Consumers should use documented machine-readable identifiers, not parse
-        human prose. <a href="https://www.rfc-editor.org/rfc/rfc9457.html">Problem Details for HTTP APIs</a>.
+        human prose. <a href="https://www.rfc-editor.org/rfc/rfc9457.html" target="_blank" rel="noopener noreferrer">Problem Details for HTTP APIs <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="msg">
         <div class="msg-head"><span class="dot dot--res"></span>Example — reject an invalid status filter</div>
@@ -729,7 +729,7 @@ Content-Type: application/problem+json
         An OpenAPI description makes the HTTP contract readable by people and tools. It can describe
         paths, methods, parameters, schemas, security requirements and responses independently of
         the server's programming language. Tools such as Swagger UI can present an interactive
-        interface over that description. <a href="https://spec.openapis.org/oas/latest.html">OpenAPI specification</a>.
+        interface over that description. <a href="https://spec.openapis.org/oas/latest.html" target="_blank" rel="noopener noreferrer">OpenAPI specification <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Insomnia or Postman collections are useful for trying concrete requests. Keep them consistent

@@ -233,7 +233,7 @@
         <p>A number inserted into a text column does <strong>not necessarily fail</strong>: a driver or
           database can convert it to text. PostgreSQL permits assignment conversions to string types.
           Even <code>TEXT NOT NULL</code> does not enforce a 5&ndash;100-character book name.
-          See <a href="https://www.postgresql.org/docs/current/typeconv-query.html">PostgreSQL's value-storage conversion rules</a>.</p>
+          See <a href="https://www.postgresql.org/docs/current/typeconv-query.html" target="_blank" rel="noopener noreferrer">PostgreSQL's value-storage conversion rules <span role="img" aria-label="opens in a new tab">↗</span></a>.</p>
       </div>
       <p>
         Reject a contract violation with <code>400 Bad Request</code>, or use
@@ -317,7 +317,7 @@ Validated result:    { "page": 2,   "limit": 20   }</code></pre></div>
           <tr><td><code>Reader@EXAMPLE.COM</code></td><td><code>Reader@example.com</code></td>
             <td>Lowercase the domain. Lowercasing the whole address requires an explicit account policy:
               the local part can be case-sensitive under
-              <a href="https://www.rfc-editor.org/rfc/rfc5321.html#section-2.4">SMTP's rules</a>.</td></tr>
+              <a href="https://www.rfc-editor.org/rfc/rfc5321.html#section-2.4" target="_blank" rel="noopener noreferrer">SMTP's rules <span role="img" aria-label="opens in a new tab">↗</span></a>.</td></tr>
           <tr><td>A national phone number</td><td>A validated international representation</td>
             <td>Use known country context. Blindly prepending <code>+</code> does not make an arbitrary
               number valid or infer its country.</td></tr>
@@ -351,7 +351,7 @@ Validated result:    { "page": 2,   "limit": 20   }</code></pre></div>
       <div class="callout callout--key"><div class="callout-label">Security has several layers</div>
         <p>Validation supports data integrity; it does not replace authorization, parameterized database
           queries or context-aware output encoding. See the
-          <a href="https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html">OWASP input validation guidance</a>.</p>
+          <a href="https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html" target="_blank" rel="noopener noreferrer">OWASP input validation guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.</p>
       </div>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Frontend validation improves user experience; backend validation enforces the input contract.</li>

@@ -166,7 +166,7 @@
         ordering reduce the risk. For retryable deadlock or serialization failures, retry the
         <strong>complete transaction</strong>, including the decisions that produced its queries,
         with bounded attempts. Keep external side effects safe from duplication.
-        See <a href="https://www.postgresql.org/docs/current/mvcc-serialization-failure-handling.html">PostgreSQL's transaction retry guidance</a>.
+        See <a href="https://www.postgresql.org/docs/current/mvcc-serialization-failure-handling.html" target="_blank" rel="noopener noreferrer">PostgreSQL's transaction retry guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         An empty query result is different: ordinary SELECT queries can return zero rows successfully.
@@ -197,7 +197,7 @@
         including a <code>Retry-After</code> delay. Reduce the request rate and respect the delay where
         supplied. If the provider's shared quota is exhausted, that does not automatically mean this
         particular user exceeded your application's quota.
-        See <a href="https://www.rfc-editor.org/rfc/rfc6585.html#section-4">the HTTP definition of 429</a>.
+        See <a href="https://www.rfc-editor.org/rfc/rfc6585.html#section-4" target="_blank" rel="noopener noreferrer">the HTTP definition of 429 <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="callout callout--warn">
         <p class="callout-label">A timeout leaves a question</p>
@@ -291,7 +291,7 @@
         liveness check can trigger a restart storm without fixing the database. Readiness may consider
         essential dependencies; an optional recommendations service should not automatically remove
         every otherwise usable instance from traffic.
-        <a href="https://kubernetes.io/docs/concepts/workloads/pods/probes/">Kubernetes' probe documentation</a>
+        <a href="https://kubernetes.io/docs/concepts/workloads/pods/probes/" target="_blank" rel="noopener noreferrer">Kubernetes' probe documentation <span role="img" aria-label="opens in a new tab">↗</span></a>
         illustrates these distinct responsibilities.
       </p>
       <h3>Check useful work separately</h3>
@@ -369,7 +369,7 @@
         Retries add load and can repeat side effects. Coordinate retry ownership: if every layer
         retries independently, a single user request can multiply into many downstream attempts.
         Use idempotency for repeated writes and avoid retrying invalid requests unchanged.
-        See <a href="https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/">AWS's explanation of retry risks, backoff and jitter</a>.
+        See <a href="https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/" target="_blank" rel="noopener noreferrer">AWS's explanation of retry risks, backoff and jitter <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="callout callout--warn">
         <p class="callout-label">More attempts are not always recovery</p>
@@ -517,7 +517,7 @@
         Known application errors have deliberate responses. Unexpected failures receive a generic
         server-error response, while diagnostic details stay in protected internal records.
         This separation is the central approach described by the
-        <a href="https://cheatsheetseries.owasp.org/cheatsheets/Error_Handling_Cheat_Sheet.html">OWASP Error Handling Cheat Sheet</a>.
+        <a href="https://cheatsheetseries.owasp.org/cheatsheets/Error_Handling_Cheat_Sheet.html" target="_blank" rel="noopener noreferrer">OWASP Error Handling Cheat Sheet <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="table-wrap"><table class="table">
         <thead><tr><th>Response element</th><th>Purpose</th></tr></thead>
@@ -573,8 +573,8 @@
         </tbody>
       </table></div>
       <p>
-        These distinctions follow <a href="https://www.rfc-editor.org/rfc/rfc9110.html#name-status-codes">HTTP semantics</a>
-        and <a href="https://www.rfc-editor.org/rfc/rfc6585.html#section-4">the definition of 429</a>.
+        These distinctions follow <a href="https://www.rfc-editor.org/rfc/rfc9110.html#name-status-codes" target="_blank" rel="noopener noreferrer">HTTP semantics <span role="img" aria-label="opens in a new tab">↗</span></a>
+        and <a href="https://www.rfc-editor.org/rfc/rfc6585.html#section-4" target="_blank" rel="noopener noreferrer">the definition of 429 <span role="img" aria-label="opens in a new tab">↗</span></a>.
         Document the choices your API makes instead of letting each endpoint invent a different policy.
       </p>
       <h3>A book catalog example</h3>
@@ -615,7 +615,7 @@
         Review registration and password-reset responses too; a reset flow can acknowledge the request
         generically without confirming that an account exists. Combine this with abuse controls rather
         than treating generic messages as a complete defense.
-        See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html#authentication-responses">OWASP's authentication response guidance</a>.
+        See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html#authentication-responses" target="_blank" rel="noopener noreferrer">OWASP's authentication response guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         This is where public error policies need context. A helpful duplicate-entry message in an
@@ -644,7 +644,7 @@
         Use structured fields and safe encoding to prevent untrusted text from forging log entries.
         Restrict access, protect transport and storage, and set retention deliberately. Use severity
         consistently: expected input rejection is different from an unexpected service failure.
-        The <a href="https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html">OWASP Logging Cheat Sheet</a>
+        The <a href="https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html" target="_blank" rel="noopener noreferrer">OWASP Logging Cheat Sheet <span role="img" aria-label="opens in a new tab">↗</span></a>
         covers data exclusion and log protection.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>

@@ -24,6 +24,8 @@ The site itself has no framework, dependencies or build step.
 | 14 | [Logging, Monitoring & Observability](sections/14-observability.html) | Structured logs, severity, metrics, cardinality, traces, spans, context propagation, OpenTelemetry, to-do instrumentation, collection tools, dashboards, alerts, sampling, retention & safe telemetry |
 | 15 | [Graceful Shutdown](sections/15-graceful-shutdown.html) | Process life cycles, signals, request draining, readiness, deployment coordination, deadlines, transactions, workers, long-lived connections, dependency cleanup, Go shutdown helpers & verification |
 | 16 | [Backend Security](sections/16-security.html) | Trust boundaries, SQL/NoSQL/command injection, password hashing, sessions, cookies, JWTs, revocation, rate limiting, BOLA, BFLA, tenant isolation, XSS, CSP, CSRF, CORS, secrets, headers & security testing |
+| 17 | [Scaling & Performance](sections/17-scaling-performance.html) | Latency distributions, percentiles, throughput, queueing, headroom, bottlenecks, profiling, tracing, N+1 queries, indexes, connection pools, PgBouncer, caching tradeoffs, vertical/horizontal scaling & capacity testing |
+| 18 | [Scaling & Performance II](sections/18-distributed-scaling.html) | Stateless instances, shared storage, load-balancing algorithms, health checks, replicas, consistency, partitioning, sharding, managed databases, CDNs, edge computing, durable jobs, microservices, autoscaling & serverless |
 
 ## Running it
 
@@ -64,8 +66,8 @@ Opening `index.html` directly from the filesystem also works.
 
    ```js
    {
-     num: '17',
-     slug: '17-your-topic',
+     num: '19',
+     slug: '19-your-topic',
      title: 'Your Next Topic',
      blurb: 'One sentence for the home page card.',
      outcomes: ['First learning goal.', 'Second learning goal.', 'Third learning goal.'],
@@ -81,6 +83,13 @@ Opening `index.html` directly from the filesystem also works.
    of `.prose`. Quick revision reuses these blocks, so there is no second set of notes to maintain.
    The table of contents, scroll-spy, anchors and search index are generated at runtime.
 
+4. **Open external resources in a new tab.** Use `target="_blank"` with `rel="noopener noreferrer"`
+   and an accessible visible indicator. Keep chapter links and page anchors in the current tab:
+
+   ```html
+   <a href="https://example.com/docs" target="_blank" rel="noopener noreferrer">Reference <span role="img" aria-label="opens in a new tab">↗</span></a>
+   ```
+
 ## Checks
 
 ```sh
@@ -88,7 +97,7 @@ node --check assets/js/app.js
 node tests/revision.test.js
 ```
 
-The dependency-free check covers revision filtering, links, goals and summary coverage in every
+The dependency-free check covers revision filtering, external resource link behavior, navigation links, goals and summary coverage in every
 lesson, navigation behavior at six breakpoint widths, theme preferences (including unavailable storage),
 search and text contrast in both themes. It uses a small DOM stub and does not verify visual layout.
 For visual checks, serve the site and try both reading modes at desktop and mobile widths, keyboard
@@ -115,7 +124,9 @@ navigation, 200% text/zoom and printing.
 │   ├── 13-configuration.html
 │   ├── 14-observability.html
 │   ├── 15-graceful-shutdown.html
-│   └── 16-security.html
+│   ├── 16-security.html
+│   ├── 17-scaling-performance.html
+│   └── 18-distributed-scaling.html
 ├── tests/revision.test.js          revision behavior and content coverage
 └── assets/
     ├── css/main.css                the whole design system

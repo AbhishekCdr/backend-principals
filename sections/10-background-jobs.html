@@ -235,11 +235,11 @@
       <div class="table-wrap"><table class="table">
         <thead><tr><th>Example</th><th>Role</th></tr></thead>
         <tbody>
-          <tr><td><a href="https://docs.celeryq.dev/en/stable/getting-started/introduction.html">Celery</a></td><td>A Python task-processing system that works with supported brokers, including RabbitMQ and Redis.</td></tr>
-          <tr><td><a href="https://docs.bullmq.io/guide/retrying-failing-jobs">BullMQ</a></td><td>A Redis-backed job library commonly used with Node.js.</td></tr>
-          <tr><td><a href="https://github.com/hibiken/asynq">Asynq</a></td><td>A Go task library backed by Redis.</td></tr>
-          <tr><td><a href="https://www.rabbitmq.com/docs/confirms">RabbitMQ</a></td><td>A message broker with producer confirmations and consumer acknowledgement mechanisms.</td></tr>
-          <tr><td><a href="https://docs.aws.amazon.com/general/latest/gr/sqs-service.html">Amazon SQS</a></td><td>A managed queue service with regional endpoints; using it does not automatically create one globally replicated queue.</td></tr>
+          <tr><td><a href="https://docs.celeryq.dev/en/stable/getting-started/introduction.html" target="_blank" rel="noopener noreferrer">Celery <span role="img" aria-label="opens in a new tab">↗</span></a></td><td>A Python task-processing system that works with supported brokers, including RabbitMQ and Redis.</td></tr>
+          <tr><td><a href="https://docs.bullmq.io/guide/retrying-failing-jobs" target="_blank" rel="noopener noreferrer">BullMQ <span role="img" aria-label="opens in a new tab">↗</span></a></td><td>A Redis-backed job library commonly used with Node.js.</td></tr>
+          <tr><td><a href="https://github.com/hibiken/asynq" target="_blank" rel="noopener noreferrer">Asynq <span role="img" aria-label="opens in a new tab">↗</span></a></td><td>A Go task library backed by Redis.</td></tr>
+          <tr><td><a href="https://www.rabbitmq.com/docs/confirms" target="_blank" rel="noopener noreferrer">RabbitMQ <span role="img" aria-label="opens in a new tab">↗</span></a></td><td>A message broker with producer confirmations and consumer acknowledgement mechanisms.</td></tr>
+          <tr><td><a href="https://docs.aws.amazon.com/general/latest/gr/sqs-service.html" target="_blank" rel="noopener noreferrer">Amazon SQS <span role="img" aria-label="opens in a new tab">↗</span></a></td><td>A managed queue service with regional endpoints; using it does not automatically create one globally replicated queue.</td></tr>
         </tbody>
       </table></div>
       <div class="callout callout--warn">
@@ -248,7 +248,7 @@
           Plain Redis Pub/Sub uses at-most-once delivery and does not retain a message for a
           disconnected subscriber to process later. Redis-backed job libraries use additional data
           structures and coordination; Redis Streams also has different delivery facilities.
-          <a href="https://redis.io/docs/latest/develop/pubsub/">Redis Pub/Sub delivery semantics</a>.
+          <a href="https://redis.io/docs/latest/develop/pubsub/" target="_blank" rel="noopener noreferrer">Redis Pub/Sub delivery semantics <span role="img" aria-label="opens in a new tab">↗</span></a>.
         </p>
       </div>
       <p>
@@ -272,7 +272,7 @@
         A <strong>transactional outbox</strong> saves the account and pending message in one database
         transaction. A relay publishes committed messages and records broker confirmation. The API
         acknowledges durable intent, not completed delivery. See the
-        <a href="https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html">transactional outbox pattern</a>.
+        <a href="https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html" target="_blank" rel="noopener noreferrer">transactional outbox pattern <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="msg">
         <div class="msg-head"><span class="dot"></span>Persist intent before acknowledging it</div>
@@ -302,14 +302,14 @@ Relay:
         enough state to recover uncompleted work. <strong>Producer confirmation</strong> establishes
         broker acceptance; <strong>consumer acknowledgement</strong> reports processing completion.
         Those are separate guarantees.
-        <a href="https://www.rabbitmq.com/docs/confirms">RabbitMQ confirmations and acknowledgements</a>.
+        <a href="https://www.rabbitmq.com/docs/confirms" target="_blank" rel="noopener noreferrer">RabbitMQ confirmations and acknowledgements <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         With SQS, receiving a message temporarily hides it for a <strong>visibility timeout</strong>.
         The worker explicitly deletes it after successful processing. If it is not deleted before
         that timeout, it can be delivered again. The worker can extend visibility while legitimately
         processing a longer task. Other systems use different acknowledgement, lock or lease mechanisms.
-        <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html">SQS visibility timeout</a>.
+        <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html" target="_blank" rel="noopener noreferrer">SQS visibility timeout <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="table-wrap"><table class="table">
         <thead><tr><th>Setting</th><th>Question it answers</th></tr></thead>
@@ -349,7 +349,7 @@ Relay:
         <strong>jitter</strong>, a bounded random variation, to avoid many workers retrying together.
         Cap attempts and delays, honor provider retry guidance, and stop when the task's deadline
         makes further execution inappropriate.
-        <a href="https://docs.bullmq.io/guide/retrying-failing-jobs">BullMQ retry and backoff options</a>.
+        <a href="https://docs.bullmq.io/guide/retrying-failing-jobs" target="_blank" rel="noopener noreferrer">BullMQ retry and backoff options <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="msg">
         <div class="msg-head"><span class="dot"></span>Example policy — five total attempts, before jitter</div>
@@ -416,7 +416,7 @@ Plus queue delay and the time spent executing each attempt</code></pre>
       <p>
         Queue-level deduplication can reduce duplicate submissions but is not a universal exactly-once
         guarantee for side effects. Keep the business identity stable across retries and deliberate
-        replays. See <a href="https://docs.bullmq.io/patterns/idempotent-jobs">BullMQ's idempotent-job guidance</a>.
+        replays. See <a href="https://docs.bullmq.io/patterns/idempotent-jobs" target="_blank" rel="noopener noreferrer">BullMQ's idempotent-job guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Idempotency preserves the intended result when the same operation runs again.</li>
@@ -445,7 +445,7 @@ Plus queue delay and the time spent executing each attempt</code></pre>
         such as FCM or APNs. Platform infrastructure delivers the message to the device; the provider
         accepting it is not proof that a user saw it. Keep token records current and handle invalid
         tokens rather than retrying them forever.
-        <a href="https://firebase.google.com/docs/cloud-messaging/fcm-architecture">FCM's delivery architecture</a>.
+        <a href="https://firebase.google.com/docs/cloud-messaging/fcm-architecture" target="_blank" rel="noopener noreferrer">FCM's delivery architecture <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <h3>Scheduling is more than a cron expression</h3>
       <ul>
@@ -457,7 +457,7 @@ Plus queue delay and the time spent executing each attempt</code></pre>
       <p>
         Celery's periodic-task documentation, for example, calls out scheduler duplication and
         overlapping runs. Scheduling is not a guarantee of exactly one execution at an exact instant.
-        <a href="https://docs.celeryq.dev/en/stable/userguide/periodic-tasks.html">Celery periodic tasks</a>.
+        <a href="https://docs.celeryq.dev/en/stable/userguide/periodic-tasks.html" target="_blank" rel="noopener noreferrer">Celery periodic tasks <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         A cleanup job may reclaim expired sessions in batches. Authentication must still reject an
@@ -507,7 +507,7 @@ Plus queue delay and the time spent executing each attempt</code></pre>
       <p>
         Persist workflow progress and output references. Decide whether a failed optional subtitle
         job blocks publication or results in a partial outcome. Even “parent” and “child” terminology
-        varies: in <a href="https://docs.bullmq.io/guide/flows/">BullMQ flows</a>, a parent normally waits
+        varies: in <a href="https://docs.bullmq.io/guide/flows/" target="_blank" rel="noopener noreferrer">BullMQ flows <span role="img" aria-label="opens in a new tab">↗</span></a>, a parent normally waits
         for its children, so parent does not universally mean the step that runs first.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
@@ -559,7 +559,7 @@ Plus queue delay and the time spent executing each attempt</code></pre>
         Return a response that describes what is true now. <code>202 Accepted</code> is appropriate
         when a requested operation has been accepted but remains unfinished. Include a way to inspect
         progress; the original HTTP response will not later transform into a completion response.
-        <a href="https://www.rfc-editor.org/rfc/rfc9110.html#name-202-accepted">HTTP 202 semantics</a>.
+        <a href="https://www.rfc-editor.org/rfc/rfc9110.html#name-202-accepted" target="_blank" rel="noopener noreferrer">HTTP 202 semantics <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="msg">
         <div class="msg-head"><span class="dot"></span>Example: POST /v1/reports</div>

@@ -186,7 +186,7 @@ CHECKOUT_V2_ENABLED=false</code></pre>
         dotenv file remain strings: <code>"10"</code> is not yet a number, and <code>"false"</code>
         is not a Boolean. An absent key is different from an empty value. Parse these deliberately;
         testing the truthiness of a nonempty <code>"false"</code> string would incorrectly enable a feature.
-        See <a href="https://nodejs.org/api/environment_variables.html">Node.js environment-variable documentation</a>.
+        See <a href="https://nodejs.org/api/environment_variables.html" target="_blank" rel="noopener noreferrer">Node.js environment-variable documentation <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Use the loader supported by your runtime or project, and document whether existing process
@@ -247,14 +247,14 @@ CHECKOUT_V2_ENABLED=false</code></pre>
         Systems such as Consul and etcd provide key-value storage, but operating them safely still
         requires authentication, access controls, backups and availability planning. A general
         key-value store is not automatically a complete secrets-management system.
-        See <a href="https://developer.hashicorp.com/consul/docs/automate/kv">Consul's KV overview</a>.
+        See <a href="https://developer.hashicorp.com/consul/docs/automate/kv" target="_blank" rel="noopener noreferrer">Consul's KV overview <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Secret-management options include HashiCorp Vault, AWS Secrets Manager, Azure Key Vault and
         Google Cloud Secret Manager. Their integrations and operating models differ. Choose based
         on the existing platform and required lifecycle controls rather than assuming every backend
         needs to operate a separate vault cluster.
-        <a href="https://developer.hashicorp.com/vault/docs/about-vault/what-is-vault">Vault's overview</a>
+        <a href="https://developer.hashicorp.com/vault/docs/about-vault/what-is-vault" target="_blank" rel="noopener noreferrer">Vault's overview <span role="img" aria-label="opens in a new tab">↗</span></a>
         describes its role in controlling access to sensitive values.
       </p>
       <h3>Understand the storage and retrieval contract</h3>
@@ -263,7 +263,7 @@ CHECKOUT_V2_ENABLED=false</code></pre>
         <code>SecureString</code> values protected with AWS KMS. Do not assume every parameter gets
         the same encryption treatment. AWS Secrets Manager adds purpose-built secret lifecycle
         features, including supported rotation workflows.
-        See <a href="https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-parameter-store.html">the Parameter Store documentation</a>.
+        See <a href="https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-parameter-store.html" target="_blank" rel="noopener noreferrer">the Parameter Store documentation <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="callout callout--key">
         <p class="callout-label">Encrypted storage does not mean unusable ciphertext in the app</p>
@@ -272,7 +272,7 @@ CHECKOUT_V2_ENABLED=false</code></pre>
           usable secret over TLS. For example, AWS Secrets Manager returns a decrypted SecretString.
           Applications do not generally need their own private key to decrypt each retrieved value.
           The secret still needs protection in application memory and logs.
-          See <a href="https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html">GetSecretValue</a>.
+          See <a href="https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html" target="_blank" rel="noopener noreferrer">GetSecretValue <span role="img" aria-label="opens in a new tab">↗</span></a>.
         </p>
       </div>
       <p>
@@ -341,8 +341,8 @@ Highest priority: approved remote configuration overrides</code></pre>
         </tbody>
       </table></div>
       <p>
-        Use the project's validation facilities or a suitable schema library, such as <a href="https://zod.dev/basics">Zod</a> in a
-        TypeScript application or <a href="https://pkg.go.dev/github.com/go-playground/validator/v10">go-playground/validator</a> in Go. Static types alone cannot validate
+        Use the project's validation facilities or a suitable schema library, such as <a href="https://zod.dev/basics" target="_blank" rel="noopener noreferrer">Zod <span role="img" aria-label="opens in a new tab">↗</span></a> in a
+        TypeScript application or <a href="https://pkg.go.dev/github.com/go-playground/validator/v10" target="_blank" rel="noopener noreferrer">go-playground/validator <span role="img" aria-label="opens in a new tab">↗</span></a> in Go. Static types alone cannot validate
         values supplied after compilation. Whichever tool you use, keep the schema and defaults near
         the configuration-loading boundary so business code receives predictable values.
       </p>
@@ -442,7 +442,7 @@ Highest priority: approved remote configuration overrides</code></pre>
         Targeting can use an eligible account, a region, a plan or a rollout cohort. Supply only the
         evaluation context needed for the decision and use trustworthy server-side attributes for
         consequential rules. OpenFeature describes a targeting key and custom context fields in its
-        <a href="https://openfeature.dev/specification/sections/evaluation-context/">evaluation-context specification</a>.
+        <a href="https://openfeature.dev/specification/sections/evaluation-context/" target="_blank" rel="noopener noreferrer">evaluation-context specification <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Keep assignment stable when a user should remain in the same experiment. A random decision
@@ -481,7 +481,7 @@ Highest priority: approved remote configuration overrides</code></pre>
         require a restart to change in the process. Normally projected ConfigMap files are updated
         eventually, but the application must notice and apply the change; subPath mounts are an
         exception to automatic file updates. ConfigMaps are intended for non-confidential data.
-        See <a href="https://kubernetes.io/docs/concepts/configuration/configmap/">the ConfigMap documentation</a>.
+        See <a href="https://kubernetes.io/docs/concepts/configuration/configmap/" target="_blank" rel="noopener noreferrer">the ConfigMap documentation <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <h3>Validate a candidate before making it active</h3>
       <p>
@@ -520,7 +520,7 @@ Highest priority: approved remote configuration overrides</code></pre>
         secret and environment needed for the task. Job titles alone are too broad; a backend developer
         does not automatically need every production credential. Separate read, update and administrative
         rights, and audit access. These practices are covered in the
-        <a href="https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html">OWASP Secrets Management Cheat Sheet</a>.
+        <a href="https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html" target="_blank" rel="noopener noreferrer">OWASP Secrets Management Cheat Sheet <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Plan rotation and revocation. Introduce a replacement, verify consumers can use it, then

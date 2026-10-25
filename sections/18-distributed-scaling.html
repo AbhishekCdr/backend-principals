@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scaling &amp; Performance II &middot; Backend Principles</title>
+<meta name="description" content="Distributed backend scaling: stateless instances, load balancing, health checks, replicas, consistency, sharding, CDN and edge delivery, durable jobs, microservices, autoscaling and serverless tradeoffs.">
+<script>
+  (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try {
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell">
+
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 18</p>
+      <h1>Scaling &amp; Performance II</h1>
+      <p class="lead">
+        Continue from <a href="17-scaling-performance.html">the performance foundations</a> into
+        <strong>shared state, traffic distribution, database scaling, edge delivery and execution models</strong>.
+        Each added component needs a clear responsibility and a defined failure policy.
+      </p>
+    </header>
+
+    <div class="prose">
+      <h2>Stateless application instances</h2>
+      <p>
+        When a load distributor can choose any application instance, a valid request should not
+        depend on a previous request having reached that same machine. If a user signs in through
+        instance A and their next request reaches B, B needs access to the authoritative information
+        required to recognize the session and perform the operation.
+      </p>
+      <p>
+        This is the useful meaning of stateless application instances: durable business state and
+        session continuity do not depend on one instance's private memory or local disk. The system
+        still has state, and request handlers still have local variables and network connections.
+        Disposable local caches and temporary files can be appropriate when they can be reconstructed
+        and their loss does not violate the application's promises.
+      </p>
+      <p>
+        Statelessness makes routing, replacement and scale-out easier. It is not the only way to
+        scale: stateful systems can also scale using explicit partitioning, replication or ownership.
+        The important question is where state lives, who owns it and what happens if that owner disappears.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Requests can move; required state remains accessible</div>
+        <pre><code>Client → routing layer → application A / B / C
+                              |    |    |
+                              shared interfaces
+                              /       |       \
+                      session store  database  object storage
+
+Local memory: request work and explicitly disposable data
+Durable state: stored under a defined availability and recovery policy</code></pre>
+      </div>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>A request should not require private state left on one particular application instance.</li>
+        <li>Stateless application instances still use stateful databases, sessions and connections.</li>
+        <li>Local disposable state is acceptable when loss and reconstruction are explicitly handled.</li>
+      </ul></div>
+
+      <h2>Sessions, uploads and shared dependencies</h2>
+      <p>
+        An in-process session map works only where that map exists. A shared database or session
+        store lets every authorized instance validate the same session token. Cookie configuration,
+        signing or encryption keys, expiration and revocation behavior must also be compatible
+        across instances. JWTs are not required to scale a browser session.
+      </p>
+      <p>
+        Uploaded files have the same issue. A file saved only on instance A may be absent when the
+        next request reaches B or A is replaced. Store durable objects through a shared service,
+        such as object storage, and keep metadata and access rules in the appropriate authoritative
+        store. A shared file service is another possible design where its semantics fit the workload.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>State</th><th>Typical shared design</th><th>Question to answer</th></tr></thead>
+        <tbody>
+          <tr><td>Sessions</td><td>Database or shared session store</td><td>How quickly does revocation reach every instance?</td></tr>
+          <tr><td>Uploads</td><td>Object storage plus metadata</td><td>Who may read the object, and when is the upload complete?</td></tr>
+          <tr><td>Business records</td><td>A database with defined consistency and recovery</td><td>What is the behavior during failure or failover?</td></tr>
+          <tr><td>Recurring work</td><td>Coordinated scheduling or durable queue ownership</td><td>Does adding a replica accidentally run the job twice?</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        A local SQLite file does not become a shared database simply because application code is
+        identical on several machines. Replicated or remotely served SQLite designs require their
+        own architecture; arbitrary file sharing is not a substitute. Likewise, a shared Redis endpoint
+        moves a dependency out of the app but does not by itself make that dependency highly available.
+        See <a href="04-auth.html">authentication</a>, <a href="10-background-jobs.html">job ownership</a>
+        and <a href="17-scaling-performance.html">shared-state scaling tradeoffs</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Share required session and upload state through suitable storage interfaces.</li>
+        <li>Keep security configuration and authorization consistent across instances.</li>
+        <li>Externalizing state creates dependencies that still need capacity, availability and recovery planning.</li>
+      </ul></div>
+
+      <h2>Where load balancing happens</h2>
+      <p>
+        Multiple serving instances need a way to select a destination. A reverse-proxy load balancer
+        receives traffic, selects a backend and forwards the request, then relays the response. This
+        forwarding normally does not mean an HTTP redirect asking the browser to navigate elsewhere.
+      </p>
+      <p>
+        A standalone load-balancer machine is one implementation, not a universal requirement.
+        Managed frontends, DNS-based distribution, client-side balancing and service discovery can
+        also participate. Understand whether selection happens per connection, request or stream,
+        and where transport and TLS terminate.
+      </p>
+      <p>
+        Layer 4 balancing typically works with transport connections; Layer 7 balancing can inspect
+        application information such as HTTP hostnames and paths. An API gateway may add authentication,
+        quotas and route policies as well as forwarding. These responsibilities can overlap in a
+        product, but their names alone do not describe its behavior.
+      </p>
+      <p>
+        The balancing layer also needs enough capacity and its own availability design. Moving all
+        traffic through a single unprotected proxy can introduce another failure point. Verify request
+        timeouts, body limits, retries and trusted forwarding headers across the full path.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Routing chooses an instance; proxy forwarding is different from redirecting the browser.</li>
+        <li>Selection can happen at several layers and at connection or request granularity.</li>
+        <li>Plan the balancing layer's capacity, availability and request-handling policies.</li>
+      </ul></div>
+
+      <h2>Round robin and weighted round robin</h2>
+      <p>
+        Round robin selects eligible backends in a rotating sequence. With three similar instances,
+        the conceptual sequence is A, B, C, A, B, C. It is a useful baseline when capacities and request
+        costs are reasonably similar. Equal request counts still do not guarantee equal resource use.
+      </p>
+      <p>
+        Weighted round robin assigns a larger share to backends with larger configured weights.
+        Weights of 2:1:1 aim to give A half the traffic and B and C one quarter each over an appropriate
+        interval. The exact short sequence depends on the implementation, such as smooth weighted
+        selection; it need not always send two consecutive requests to A.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Example backend</th><th>Weight</th><th>Long-run share in this simple model</th></tr></thead>
+        <tbody>
+          <tr><td>A</td><td>2</td><td>2 / 4 = 50%</td></tr>
+          <tr><td>B</td><td>1</td><td>1 / 4 = 25%</td></tr>
+          <tr><td>C</td><td>1</td><td>1 / 4 = 25%</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Hardware specifications alone do not prove the right weights. A backend with twice the CPU
+        cores may not sustain twice the workload if it waits on the same database. Measure effective
+        capacity and watch for skew when expensive requests happen to concentrate on one instance.
+        See <a href="https://nginx.org/en/docs/http/load_balancing.html" target="_blank" rel="noopener noreferrer">NGINX's balancing overview <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Round robin distributes turns, not equal amounts of computational work.</li>
+        <li>Weights specify intended traffic shares; implementations determine the short sequence.</li>
+        <li>Choose weights from measured serving capacity and monitor workload skew.</li>
+      </ul></div>
+
+      <h2>Connection-aware and adaptive selection</h2>
+      <p>
+        Least-connections selection favors an eligible backend with fewer active connections under
+        the balancer's definition. A long operation may keep a connection occupied longer, helping
+        the policy respond to uneven work. Weighted variants account for configured capacity, but
+        they do not promise an exact 2:1 request ratio at every moment.
+      </p>
+      <p>
+        A server with an active request can still receive more requests when it is the selected
+        candidate. The algorithm does not reserve each server for a single request. Connections
+        also differ from outstanding requests: HTTP/1.1 commonly keeps connections open after a
+        response, HTTP/2 multiplexes streams, and HTTP/3 runs over QUIC rather than TCP.
+      </p>
+      <p>
+        Some products offer least-outstanding-request, latency-aware or resource-aware policies.
+        They depend on the actual measurement and feedback mechanism. A low response time could
+        reflect quick errors rather than useful work, and CPU measurements may miss a downstream wait.
+        Stale or noisy feedback can produce poor routing decisions too.
+      </p>
+      <p>
+        Select the algorithm from the workload and the product's documented semantics. Combine it
+        with health eligibility, concurrency limits and overload controls. A smarter selection policy
+        cannot create capacity in a saturated shared dependency. See the
+        <a href="https://nginx.org/en/docs/http/load_balancing.html" target="_blank" rel="noopener noreferrer">NGINX method descriptions <span role="img" aria-label="opens in a new tab">↗</span></a>
+        and <a href="17-scaling-performance.html">capacity and queueing fundamentals</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Least-connections uses occupancy as a signal; it is not perfect knowledge of request cost.</li>
+        <li>Connection counts and in-flight request counts differ with persistent and multiplexed protocols.</li>
+        <li>Adaptive selection still needs reliable measurements and overload protection.</li>
+      </ul></div>
+
+      <h2>Health checks, recovery and draining</h2>
+      <p>
+        A load balancer can send active probes to assess whether a backend should receive traffic.
+        It may also use passive evidence from real connection or request failures. A dead process
+        can cause a connection error or timeout; it does not necessarily return an HTTP error itself.
+        The proxy may generate a response for the client.
+      </p>
+      <p>
+        Probe intervals, timeouts, accepted status codes and failure/recovery thresholds are configurable.
+        Requiring several failures before removal and several successes before recovery helps avoid
+        flapping. A simple illustrative policy might mark a target unhealthy after three failed probes
+        and eligible again after two successful ones. There is still a detection window.
+      </p>
+      <p>
+        Readiness asks whether the instance should serve new work. Liveness asks whether restarting
+        it could help. A lightweight readiness check can include necessary initialized dependencies,
+        but repeatedly exercising expensive business operations can add load. Treat common dependency
+        failures carefully: removing every instance or restarting all of them may worsen an outage.
+      </p>
+      <p>
+        Product failure behavior matters. For example, AWS Application Load Balancer documents a
+        fail-open behavior when all registered targets are unhealthy; do not assume every balancer
+        always sends zero traffic to every unhealthy target. See
+        <a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/application/target-group-health-checks.html" target="_blank" rel="noopener noreferrer">its health-check policy <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Planned removal also requires draining existing work after routing withdrawal. Recovering
+        instances may need initialization and cache warmup before full traffic. In-flight operations
+        can fail during an unplanned loss, and retries must respect idempotency. See
+        <a href="15-graceful-shutdown.html">graceful shutdown</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Configure probe timeouts and failure/recovery thresholds rather than assuming instant detection.</li>
+        <li>Separate readiness, liveness and planned draining; probes themselves have a cost.</li>
+        <li>Verify all-unhealthy behavior and preserve safe retry semantics during failures.</li>
+      </ul></div>
+
+      <h2>Read replicas scale suitable reads</h2>
+      <p>
+        Application replicas can all reach the same database until that shared database becomes the
+        limiting resource. One database scaling approach keeps a writable primary and creates replicas
+        that replay its changes and serve permitted read workloads. Applications or routing middleware
+        decide which operations can use those replicas.
+      </p>
+      <div class="msg">
+        <div class="msg-head">An illustrative primary-and-replica topology</div>
+        <pre><code>Writes and freshness-critical reads → primary
+                                      |
+                               replicated changes
+                                 /           \
+                      read replica A      read replica B
+                      suitable reads      suitable reads</code></pre>
+      </div>
+      <p>
+        Replicas can move read work away from the primary and place data closer to application
+        instances. They also consume resources for receiving and applying changes. A workload with
+        70% read requests does not automatically reduce primary resource use by 70%: operations have
+        different costs, some reads still need the primary, and replication has overhead.
+      </p>
+      <p>
+        This topology does not distribute the primary's write workload across writable nodes.
+        Additional read replicas are not a universal solution for write saturation. Nor does a
+        failover standby necessarily expose the same read-serving interface as a read replica in
+        every managed product. Verify the engine and service's actual behavior.
+      </p>
+      <p>
+        PostgreSQL supports readable hot standbys as part of its replication facilities. Replication
+        modes, supported queries and failover choices affect the design; other engines have their
+        own mechanisms. See <a href="https://www.postgresql.org/docs/current/warm-standby.html" target="_blank" rel="noopener noreferrer">PostgreSQL standby and replication concepts <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Route suitable read work to replicas and writes to the intended writable authority.</li>
+        <li>Measure load reduction rather than equating read-request percentage with saved resources.</li>
+        <li>Read replicas do not automatically scale writes or provide every failover guarantee.</li>
+      </ul></div>
+
+      <h2>Replication lag and read-after-write behavior</h2>
+      <p>
+        A user changes their profile name and immediately reloads it. The write commits on the
+        primary, but a read routed to a lagging replica can return the previous name. The write may
+        have succeeded even though the next screen appears to undo it.
+      </p>
+      <p>
+        Replication lag is not a fixed geographic round-trip time. It also depends on transfer,
+        queueing, replay throughput, long operations, load and failures. An observed average of
+        200 ms does not establish a maximum. A fixed browser delay of 300 ms therefore cannot
+        guarantee that the next read sees the write.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Approach</th><th>Tradeoff</th></tr></thead>
+        <tbody>
+          <tr><td>Route required follow-up reads to the primary</td><td>Provides the needed view under the database's transaction semantics, while retaining primary load.</td></tr>
+          <tr><td>Wait for a replica to reach an appropriate commit/replay position</td><td>Needs engine support, a meaningful consistency token, a timeout and a fallback policy.</td></tr>
+          <tr><td>Choose suitable synchronous replication semantics</td><td>Can improve guarantees for designated replicas, with extra commit latency and availability consequences.</td></tr>
+          <tr><td>Allow a documented stale view</td><td>Suits some feeds or analytics, but not every account or payment decision.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Receiving or flushing replication data is not always the same as applying it so a query can
+        see it. PostgreSQL's <code>remote_apply</code> option waits for the designated synchronous
+        standbys to replay a commit; routing reads to another asynchronous replica would still need
+        consideration. See <a href="https://www.postgresql.org/docs/current/warm-standby.html#SYNCHRONOUS-REPLICATION" target="_blank" rel="noopener noreferrer">its synchronous replication semantics <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Returning the committed representation from the write can avoid an unnecessary immediate
+        fetch, but does not replace the consistency policy for later reads. A primary read can also
+        be obscured by an old application or CDN cache. Design freshness across the entire path.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Asynchronous replicas may return older data after a successful primary write.</li>
+        <li>Average lag and fixed sleeps cannot establish a read-after-write guarantee.</li>
+        <li>Use explicit routing or replication guarantees and include caches in the freshness policy.</li>
+      </ul></div>
+
+      <h2>Partitioning and sharding are different scopes</h2>
+      <p>
+        Partitioning divides a logical data set into smaller pieces. A database can partition one
+        table within a single database server. Sharding usually means distributing partitions across
+        independently placed database nodes or groups so storage and processing can spread across
+        machines. The terms overlap, but a partitioned table is not automatically a distributed database.
+      </p>
+      <p>
+        Splitting orders by date can help when queries constrain that date and the database can prune
+        unrelated partitions. It can also simplify archival and deletion of old ranges. Splitting data
+        does not guarantee that every query becomes faster, and a well-indexed large table is not
+        inherently slow merely because it has many rows.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Non-overlapping illustrative date ranges</div>
+        <pre><code>Range A: 2026-01-01 ≤ order_date &lt; 2026-07-01
+Range B: 2026-07-01 ≤ order_date &lt; 2027-01-01
+
+A query restricted to March can target Range A.
+A query for all orders of user 5, with no date constraint,
+may need both ranges unless another routing/index design helps.</code></pre>
+      </div>
+      <p>
+        A shard normally still has its own indexes and may have replicas for availability or reads.
+        Partitioning, sharding, replication and indexing solve related but different problems.
+        PostgreSQL's native table partitioning describes partition pruning and its requirements;
+        it does not by itself turn ordinary partitions into independent distributed write nodes.
+        See <a href="https://www.postgresql.org/docs/current/ddl-partitioning.html" target="_blank" rel="noopener noreferrer">the partitioning documentation <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Partitioning can happen on one server; sharding distributes data across nodes or groups.</li>
+        <li>Query benefits depend on whether the workload can target the relevant pieces.</li>
+        <li>Shards still need indexes, replication and an operational recovery plan.</li>
+      </ul></div>
+
+      <h2>Choose shard keys for the workload</h2>
+      <p>
+        The shard key determines which piece owns a record and whether an operation can find its
+        destination efficiently. A tenant or user key may keep that user's related data together.
+        A date key can make archival simple but concentrate every new write on the latest shard.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Strategy</th><th>Potential benefit</th><th>Risk</th></tr></thead>
+        <tbody>
+          <tr><td>Range</td><td>Efficient routing for matching ranges and useful locality.</td><td>Uneven ranges, hot recent data and range-boundary maintenance.</td></tr>
+          <tr><td>Hash</td><td>Can distribute many keys more evenly.</td><td>Range queries can fan out; very hot individual keys remain hot.</td></tr>
+          <tr><td>Directory or placement map</td><td>Explicit control over where tenants or groups live.</td><td>The map and migration process need consistency and availability.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Consider how to route reads and writes, generate identifiers, enforce uniqueness, join related
+        records and perform cross-shard transactions or reports. A query that must visit every shard
+        can become slower as shards are added. Global ordering and pagination also require a design
+        rather than simply concatenating arbitrary result pages.
+      </p>
+      <p>
+        Adding a shard often requires moving data, updating placement information and handling
+        requests during migration. A toy <code>hash(key) modulo shard_count</code> formula changes
+        many destinations when the count changes; production rebalancing needs more than changing
+        that number. A managed sharding layer can handle mechanics while still depending on a
+        suitable application data model. See <a href="https://vitess.io/docs/overview/whatisvitess/" target="_blank" rel="noopener noreferrer">Vitess's sharding-oriented architecture <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Choose keys from locality, distribution and routing requirements, not table size alone.</li>
+        <li>Plan hot keys, cross-shard work, uniqueness and pagination explicitly.</li>
+        <li>Rebalancing requires a safe migration and placement strategy.</li>
+      </ul></div>
+
+      <h2>Managed databases still have a responsibility boundary</h2>
+      <p>
+        Managed services can operate provisioning, replication, backups and failover features for you.
+        They do not all implement the same architecture. “Serverless,” “distributed” and “managed”
+        describe different properties; none alone promises automatic sharding or unlimited write capacity.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Architecture example</th><th>What to examine</th></tr></thead>
+        <tbody>
+          <tr><td>Managed PostgreSQL with replicas</td><td>Writable-primary capacity, read routing, replica lag and failover semantics.</td></tr>
+          <tr><td>Disaggregated PostgreSQL compute and storage</td><td>Compute scaling and storage behavior; do not infer automatic row-level write sharding.</td></tr>
+          <tr><td>A sharding middleware layer</td><td>Shard-key model, routing and resharding capabilities.</td></tr>
+          <tr><td>Distributed SQL</td><td>Data placement, transaction guarantees, quorum costs and cross-region latency.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        For concrete differences, compare <a href="https://neon.com/docs/introduction/architecture-overview" target="_blank" rel="noopener noreferrer">Neon's compute/storage architecture <span role="img" aria-label="opens in a new tab">↗</span></a>,
+        <a href="https://vitess.io/docs/overview/whatisvitess/" target="_blank" rel="noopener noreferrer">Vitess <span role="img" aria-label="opens in a new tab">↗</span></a> and
+        <a href="https://www.cockroachlabs.com/docs/stable/architecture/overview" target="_blank" rel="noopener noreferrer">CockroachDB's architecture <span role="img" aria-label="opens in a new tab">↗</span></a>.
+        Product language, implementation language and SQL compatibility do not by themselves establish
+        how a service distributes writes.
+      </p>
+      <p>
+        Your team still owns schema and query design, access control, connection budgets, freshness
+        choices, cost limits and restore requirements. Verify which features the chosen plan actually
+        includes and practice recovery. Replication is not a backup: an accidental deletion can
+        propagate to replicas too. Decide the acceptable loss window and restoration time, then test them.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Compare concrete database capabilities rather than treating every managed product as equivalent.</li>
+        <li>The provider operates selected mechanisms; the application still owns data and consistency choices.</li>
+        <li>Verify backup, restore and failover behavior instead of assuming replicas cover all recovery needs.</li>
+      </ul></div>
+
+      <h2>CDNs reduce distance for reusable content</h2>
+      <p>
+        A content delivery network serves eligible content from distributed points of presence, or
+        PoPs. On a cache hit, the response can avoid a trip to the origin. This can reduce viewer
+        latency and origin traffic. A miss may still fetch the origin, possibly through additional
+        cache tiers. See <a href="https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html" target="_blank" rel="noopener noreferrer">CloudFront's delivery model <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Geography imposes a propagation component on network latency. As an illustrative calculation,
+        if a round-trip fiber path totals 20,000 km and propagation is approximately 200,000 km/s,
+        propagation alone takes 0.1 seconds. That is not a measured Tokyo-to-Virginia guarantee:
+        actual path length, routing, equipment, handshakes and congestion affect the result.
+      </p>
+      <p>
+        Moving a response close to the viewer can remove much of that distant path. It does not
+        guarantee a 2 ms response or a fixed 50% traffic reduction. Benefits depend on routing,
+        cacheability, hit rate, payloads and origin behavior. Nor is a PoP necessarily located at
+        every user's first ISP hop; CDN operators use varied networks and peering arrangements.
+      </p>
+      <p>
+        Static bundles, images, fonts and videos are common candidates. Generated public pages and
+        API responses can also be cached under an appropriate policy. An edge proxy can accelerate
+        routing for uncached traffic, but it cannot skip required origin work simply by being nearby.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>CDN hits can avoid distant origin requests and reduce origin load.</li>
+        <li>Propagation is only one part of network latency; fixed speedup and traffic-saving claims need measurements.</li>
+        <li>Cacheability and the actual request path determine the benefit.</li>
+      </ul></div>
+
+      <h2>Cache policies must preserve freshness and privacy</h2>
+      <p>
+        A CDN needs a policy defining what may be reused, for whom and for how long. Origin headers,
+        CDN rules and cache-key construction all participate. Two responses with the same URL are
+        not interchangeable if they differ by user, tenant, language or another relevant input.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Illustrative policies for different response types</div>
+        <pre><code>Content-hashed public bundle, such as app.8d21f3.js:
+  Cache-Control: public, max-age=31536000, immutable
+
+Sensitive response that must not be stored by caches:
+  Cache-Control: no-store</code></pre>
+      </div>
+      <p>
+        The long-lived asset policy assumes a changed bundle gets a changed URL. The HTML pointing
+        to that bundle needs its own suitable freshness policy. For generated public API responses,
+        decide how much staleness is acceptable and how updates invalidate or replace cached results.
+        Availability, stock and payment decisions may need a fresher source than a product description.
+      </p>
+      <p>
+        Purging by URL, prefix or tag depends on the provider's features and configuration. A purge
+        is an invalidation mechanism, not a promise that every browser cache immediately disappears
+        or every race is solved. A miss normally causes a later fetch; purging does not necessarily
+        prepopulate every edge. See <a href="https://developers.cloudflare.com/cache/concepts/cache-control/" target="_blank" rel="noopener noreferrer">Cloudflare's origin cache-control behavior <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Do not put authenticated personalized responses into a shared public cache by accident.
+        Carefully review cookies, Authorization, Vary and explicit cache rules rather than relying
+        on a filename extension or a single header. Test one user's response against another user's
+        request. See <a href="16-security.html">the security lesson</a> and
+        <a href="09-caching.html">cache invalidation fundamentals</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Define cache eligibility, identity, lifetime and invalidation for each response class.</li>
+        <li>Version immutable assets and give HTML and generated data their own freshness policies.</li>
+        <li>Protect personalized data from shared-cache leakage and test actual CDN behavior.</li>
+      </ul></div>
+
+      <h2>DDoS protection and origin exposure</h2>
+      <p>
+        A denial-of-service attack consumes resources so legitimate work cannot complete. A distributed
+        attack uses many sources; a botnet is one way to generate it. Network saturation, expensive
+        uncached endpoints and forced autoscaling can produce availability problems or unexpectedly
+        high cost even without a process crash.
+      </p>
+      <p>
+        A suitably configured CDN or security edge can absorb some traffic, cache responses, enforce
+        rules and apply challenges or rate limits before requests reach the origin. The exact
+        protections, coverage and controls depend on the service. See
+        <a href="https://developers.cloudflare.com/ddos-protection/" target="_blank" rel="noopener noreferrer">Cloudflare's DDoS protection documentation <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        This does not make the origin invulnerable. Attackers may bypass the edge if the origin is
+        directly reachable, and legitimate-looking expensive requests can still pass through.
+        Restrict origin access where appropriate, validate forwarded identity, protect costly operations
+        and set concurrency and scaling budgets. Challenges also affect real users and need deliberate
+        configuration and monitoring.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>DDoS can harm availability and cost through both traffic volume and expensive work.</li>
+        <li>An edge security service helps only within its configured scope and request path.</li>
+        <li>Protect the origin and retain application-level limits and monitoring.</li>
+      </ul></div>
+
+      <h2>Edge computing moves selected work closer</h2>
+      <p>
+        Edge computing executes code near a request's ingress location instead of only returning a
+        cached object. Useful tasks include redirects, routing, header validation, localization and
+        selected authentication checks. The gain comes from the execution and data paths avoided,
+        not from a guarantee that the same computation uses fewer CPU cycles.
+      </p>
+      <p>
+        A signed token can sometimes be checked locally with trusted keys and the correct issuer,
+        audience and expiration rules. A server-side session may still require a distant authoritative
+        lookup, retaining that network cost. Local verification also needs a revocation policy.
+        Resource authorization remains necessary, and an origin must not blindly trust a public
+        client-supplied header claiming “already authenticated.”
+      </p>
+      <p>
+        Runtime limits vary. Cloudflare Workers uses V8 isolates, while other execution platforms use
+        different isolation models. It would be inaccurate to say edge code universally cannot use
+        TCP or a filesystem: Workers documents <a href="https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/" target="_blank" rel="noopener noreferrer">outbound TCP sockets <span role="img" aria-label="opens in a new tab">↗</span></a>
+        and a compatibility-dependent <a href="https://developers.cloudflare.com/workers/runtime-apis/nodejs/fs/" target="_blank" rel="noopener noreferrer">virtual filesystem <span role="img" aria-label="opens in a new tab">↗</span></a>.
+        Those facilities still have restrictions and do not turn temporary local files into durable shared storage.
+      </p>
+      <p>
+        Check CPU time, memory, duration, network access, library compatibility, storage and data
+        placement for the chosen runtime. If an edge function immediately queries a distant database,
+        moving its code alone may add an extra hop. Benchmark the whole path rather than assuming
+        “edge” is always faster. See <a href="https://developers.cloudflare.com/workers/reference/how-workers-works/" target="_blank" rel="noopener noreferrer">how Workers executes code <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Move work to the edge when it avoids an expensive path without weakening correctness or authorization.</li>
+        <li>Authentication speed depends on where its authoritative data and revocation state live.</li>
+        <li>Verify runtime capabilities and limits; edge platforms are not interchangeable.</li>
+      </ul></div>
+
+      <h2>Asynchronous processing needs a durable handoff</h2>
+      <p>
+        Some operations need a completed result before the response; others can finish later under
+        an explicit contract. Creating a team invitation illustrates the distinction. The invitation
+        must exist durably and pass authorization checks, but email delivery can follow asynchronously.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Conceptual invitation workflow</div>
+        <pre><code>Request handler:
+  authenticate and authorize the inviter
+  validate the invite and enforce membership/uniqueness rules
+  begin database transaction
+    insert invitation with acceptance_state = pending
+    insert outbox event requesting invitation-email delivery
+  commit
+  return the created invitation with delivery_state = pending
+
+Dispatcher:
+  publish committed outbox work to a durable job system
+
+Worker:
+  load authorized delivery data and send the email
+  record delivery outcome; acknowledge according to the job protocol</code></pre>
+      </div>
+      <p>
+        The response now waits for durable acceptance rather than the external email round trip.
+        A 201 can describe the created invitation resource while delivery remains pending; a 202 can
+        describe an accepted asynchronous operation. Neither should claim that an email has already
+        been delivered. Expose the status the product actually promises.
+      </p>
+      <p>
+        Writing the invitation and then publishing a job creates a failure gap if the process crashes
+        between them. A transactional outbox records the intent with the database change, then a
+        dispatcher can retry publication. Delivery may still be repeated, so design idempotency and
+        failure handling. See <a href="https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html" target="_blank" rel="noopener noreferrer">the outbox pattern <span role="img" aria-label="opens in a new tab">↗</span></a>
+        and <a href="10-background-jobs.html">background job reliability</a>.
+      </p>
+      <p>
+        Queuing changes user waiting time, not the total required work. Workers need capacity,
+        deadlines, retries, dead-letter or failure handling, and queue-age monitoring. An untracked
+        task launched after returning the response is not a durable handoff. Authentication and
+        critical business checks still belong before accepting the work.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Respond after the operation's promised acceptance state is durable.</li>
+        <li>Distinguish created, accepted, delivered and completed states in the API and UI.</li>
+        <li>Protect the database-to-job handoff and make workers retry-safe and observable.</li>
+      </ul></div>
+
+      <h2>Long jobs and truthful completion states</h2>
+      <p>
+        Media processing often becomes a workflow after a durable upload: generate thumbnails,
+        produce encodings, transcribe audio and publish the ready asset. Some steps can run in
+        parallel, while others depend on prior output. Persist the uploaded object and job state so
+        closing the browser does not destroy accepted work. Completion time still needs a product
+        expectation, even when it is asynchronous.
+      </p>
+      <p>
+        Account deletion also needs a lifecycle rather than an immediate claim that every byte is gone.
+        A server can validate the request, mark the account as deleting, revoke access as required and
+        durably schedule cleanup. The response should say deletion was requested or is in progress.
+        Only mark it complete when the defined deletion workflow actually finishes.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Illustrative asynchronous response contract</div>
+        <pre><code>HTTP/1.1 202 Accepted
+Location: /operations/deletion-123
+Content-Type: application/json
+
+{"operationId":"deletion-123","status":"pending"}</code></pre>
+      </div>
+      <p>
+        Large deletions may require bounded batches and resumable checkpoints instead of one enormous
+        transaction across every store. Prevent new writes that recreate deleted data, respect foreign
+        keys, and define what happens if one cleanup step fails. Cross-service objects, backups and
+        any retained records need the platform's documented policy; a success toast is not evidence
+        that all storage has been erased.
+      </p>
+      <p>
+        Choose a job runtime that fits duration and resource needs. A long video transcode may exceed
+        a short-lived function's limits and belong in a batch worker or container job. Scaling producers
+        faster than consumers merely grows the backlog unless admission and worker capacity are managed.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Persist uploads and workflow state before promising background completion.</li>
+        <li>Return pending states for deletion or processing that has not finished.</li>
+        <li>Use bounded, resumable work and prevent new writes from defeating cleanup.</li>
+      </ul></div>
+
+      <h2>Monoliths and service boundaries</h2>
+      <p>
+        A monolith is deployed as one application unit, even when it contains well-separated modules
+        and runs in many replicas. Microservices divide the system into services that can be deployed
+        and operated independently. Repository layout does not decide the architecture: a monorepo
+        can contain several services, and several repositories can still have tightly coupled releases.
+      </p>
+      <p>
+        A modular monolith can be a useful starting point because function calls, transactions,
+        development and deployment remain relatively direct. It can also scale horizontally. A
+        microservice split is not a prerequisite for serving a large user base.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Reason to consider a boundary</th><th>What to establish first</th></tr></thead>
+        <tbody>
+          <tr><td>Independent releases and ownership</td><td>A stable domain boundary and a team able to operate the service.</td></tr>
+          <tr><td>Different capacity or isolation needs</td><td>A measurable reason to scale or contain one workload separately.</td></tr>
+          <tr><td>A distinct runtime or toolchain</td><td>Benefits that justify another deployment and communication boundary.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        There is no mandatory threshold of 100 or 200 engineers. Organizational needs can motivate
+        service separation, but team size alone does not determine a safe boundary. Nor does needing
+        a fast image library automatically require another service: native libraries, separate worker
+        processes and existing runtime bindings may be alternatives. Benchmark the implementation
+        rather than assuming a language switch creates a fixed tenfold speedup.
+      </p>
+      <p>
+        Independent scaling can also begin by separating a background worker from the HTTP serving
+        process. Accept a service boundary when its ownership, release, isolation or capacity benefit
+        pays for the additional operational work.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>A monolith can be modular and horizontally scaled; microservices are independently operated deployment units.</li>
+        <li>Choose service boundaries from domain and operational needs rather than headcount or fashion.</li>
+        <li>Consider simpler worker or library boundaries before introducing a new network service.</li>
+      </ul></div>
+
+      <h2>Service separation adds distributed-system costs</h2>
+      <p>
+        A function call across modules can become an HTTP, RPC or message exchange across services.
+        That introduces serialization, network latency, timeouts, partial failures and versioned
+        contracts. Repeated chatty calls can erase an expected scaling benefit.
+      </p>
+      <p>
+        A request crossing order, payment and notification services needs correlated telemetry to
+        explain its path. Carry trace context across boundaries and record useful service outcomes.
+        Logs and metrics remain useful, but they do not automatically reconstruct a distributed
+        request without appropriate context and instrumentation. See <a href="14-observability.html">observability practices</a>.
+      </p>
+      <p>
+        Service-owned databases are not simply replicas of one shared database. They can hold
+        different domains and schemas, so keeping a business workflow consistent requires explicit
+        coordination. A local transaction in the order service does not automatically roll back an
+        already completed external payment or an email sent by another service.
+      </p>
+      <p>
+        Durable events, outboxes, idempotency and compensating workflows are possible tools. A saga
+        coordinates steps and business compensations; it is not equivalent to an invisible ACID
+        transaction spanning arbitrary services. Design intermediate states, retries and operator
+        recovery. See <a href="https://docs.aws.amazon.com/prescriptive-guidance/latest/modernization-data-persistence/saga-pattern.html" target="_blank" rel="noopener noreferrer">the saga pattern <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Choose boundaries that reduce total operational and organizational friction. If every service
+        must be changed and deployed together, the system may have acquired network failure modes
+        without gaining useful deployment independence.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Network boundaries introduce latency, partial failure, contracts and operational ownership.</li>
+        <li>Service-owned data requires business-level coordination, not just replica synchronization.</li>
+        <li>Use explicit workflow states and recovery instead of assuming one global rollback.</li>
+      </ul></div>
+
+      <h2>Autoscaling still needs capacity planning</h2>
+      <p>
+        Autoscaling changes capacity from a policy and observed or predicted demand. CPU, memory,
+        outstanding work, queue age or application-specific metrics can be inputs. Choose a signal
+        that represents the limiting resource; a universal memory threshold cannot describe every workload.
+      </p>
+      <p>
+        New capacity takes time to become useful. That can include scheduling, starting a container
+        or VM, initializing the application, establishing connections and warming caches. It does
+        not always require compiling source or booting a fresh operating system: prebuilt images,
+        warm capacity and the selected platform change the path.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Policy dimension</th><th>Decision</th></tr></thead>
+        <tbody>
+          <tr><td>Minimum capacity</td><td>Baseline readiness, failure headroom and any acceptable scale-from-zero delay.</td></tr>
+          <tr><td>Maximum capacity</td><td>Cost budget, account quotas and downstream capacity that must not be exceeded.</td></tr>
+          <tr><td>Scale-out timing</td><td>Signals, stabilization, startup delay and expected bursts.</td></tr>
+          <tr><td>Scale-in timing</td><td>Safe draining, backlog and avoiding repeated capacity oscillation.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Dynamic threshold-based scaling is reactive, but autoscaling is not limited to that model.
+        Scheduled and predictive policies can prepare for known or recurring peaks. Forecasts still
+        have limits, so retain headroom and overload protection. See
+        <a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-predictive-scaling.html" target="_blank" rel="noopener noreferrer">AWS's predictive scaling model <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Protect database connections, external-service quotas and queues as application instances
+        grow. More servers can amplify pressure on the same saturated dependency. Budget alerts,
+        concurrency caps and graceful rejection need to work together; a spending alert alone is
+        not a real-time enforcement mechanism.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Select workload-relevant signals and include startup and warmup delay.</li>
+        <li>Set capacity bounds from availability, budget and downstream limits.</li>
+        <li>Use predictive or scheduled preparation where useful, with safe scale-in and overload behavior.</li>
+      </ul></div>
+
+      <h2>Serverless changes the operating boundary</h2>
+      <p>
+        Serverless computing delegates more infrastructure operation to a provider. Servers still
+        execute the code, but the application team generally works with a supported runtime,
+        deployment artifact and event or request interface rather than administering each host.
+        Functions, managed containers and edge runtimes have different execution models.
+      </p>
+      <p>
+        An HTTP function can be invoked through a gateway, function URL or platform routing layer.
+        Other functions respond to queue messages, object uploads or schedules. A new invocation
+        does not necessarily mean a new physical server, and a successful response does not imply
+        that the execution environment is immediately destroyed.
+      </p>
+      <p>
+        Configuration still matters: runtime, memory or CPU allocation, duration, permissions,
+        networking, concurrency and dependencies may remain your responsibility. The provider's
+        lifecycle can reuse initialized environments, create more of them or retire them. Do not
+        use a reused environment as the only home for durable application state.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Compare the whole cost model</div>
+        <pre><code>Traditional deployment:
+  provisioned capacity + storage/network + operational costs
+
+Serverless deployment, depending on the product:
+  requests + billed execution/resources + provisioned warm capacity
+  + gateway/queue/storage/network + observability and operations</code></pre>
+      </div>
+      <p>
+        Request-driven billing can help bursty or infrequent workloads, but does not guarantee lower
+        total cost. A provider may bill wall-clock duration, allocated memory, CPU time, requests or
+        reserved capacity under different plans. Include retries, data transfer and dependent
+        services. See <a href="https://aws.amazon.com/lambda/pricing/" target="_blank" rel="noopener noreferrer">Lambda's pricing dimensions <span role="img" aria-label="opens in a new tab">↗</span></a>
+        and <a href="https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtime-environment.html" target="_blank" rel="noopener noreferrer">its execution-environment lifecycle <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Serverless delegates host operations while retaining application configuration and correctness responsibilities.</li>
+        <li>Invocation, execution environment and physical server are different concepts.</li>
+        <li>Compare complete workload costs rather than assuming billing covers only useful CPU time.</li>
+      </ul></div>
+
+      <h2>Cold starts and execution environment reuse</h2>
+      <p>
+        A cold start includes work needed to prepare an execution environment before it handles an
+        invocation. It can involve loading code, starting a runtime, initializing libraries and opening
+        dependencies. An initialized environment can serve later work, but reuse and retirement are
+        controlled by the platform rather than guaranteed for a fixed number of seconds.
+      </p>
+      <p>
+        Isolation designs differ. <a href="https://firecracker-microvm.github.io/" target="_blank" rel="noopener noreferrer">Firecracker <span role="img" aria-label="opens in a new tab">↗</span></a> is
+        a microVM technology used for function and container services;
+        <a href="https://developers.cloudflare.com/workers/reference/how-workers-works/" target="_blank" rel="noopener noreferrer">Workers uses V8 isolates <span role="img" aria-label="opens in a new tab">↗</span></a>
+        inside an existing runtime. Neither description establishes a universal end-to-end startup
+        time, and not every serverless product uses the same mechanism.
+      </p>
+      <p>
+        Language labels alone do not predict cold-start behavior. Compiled programs are commonly
+        built before deployment, while interpreted or JIT runtimes still perform initialization.
+        Package size, imports, runtime setup, application initialization and dependency calls all
+        matter. Measure the deployed artifact under realistic concurrency instead of ranking languages
+        by a simplistic “interpreted is faster” rule.
+      </p>
+      <p>
+        Reduce unnecessary initialization and use supported warm-capacity or snapshot facilities
+        when the latency target justifies their cost and constraints. For example, Lambda offers
+        <a href="https://docs.aws.amazon.com/lambda/latest/dg/provisioned-concurrency.html" target="_blank" rel="noopener noreferrer">provisioned concurrency <span role="img" aria-label="opens in a new tab">↗</span></a>
+        to pre-initialize capacity. A few periodic pings do not guarantee that future traffic uses
+        the same environment or that a burst avoids additional initialization.
+      </p>
+      <p>
+        Compare cold and warm distributions at the required arrival rate. A low startup overhead
+        can still accompany a slow distant database call. A conventional always-running deployment
+        also experiences initialization during replacement or scaling, so evaluate the request path
+        and readiness policy rather than the deployment label alone.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Cold starts prepare execution environments; warm reuse is helpful but not guaranteed durable state.</li>
+        <li>Benchmark artifact, runtime and dependency initialization instead of inferring it from language category.</li>
+        <li>Supported warm-capacity controls are more explicit than synthetic pings, with their own cost and limits.</li>
+      </ul></div>
+
+      <h2>Duration, connections and stateful protocols</h2>
+      <p>
+        Function runtimes have quotas for duration, concurrency, memory, payloads and network activity.
+        For standard Lambda function invocations, 15 minutes is a maximum execution duration, not
+        a minimum. Other modes and services can differ, and HTTP gateways can impose shorter timeouts
+        than the compute layer. Check the current <a href="https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html" target="_blank" rel="noopener noreferrer">Lambda quotas <span role="img" aria-label="opens in a new tab">↗</span></a>
+        and the limits of each component in the actual request path.
+      </p>
+      <p>
+        A durable workflow can coordinate steps over a long period without one function continuously
+        executing for that whole time. A thirty-minute media job still needs a runtime and orchestration
+        design that supports its work; splitting a workflow is different from assuming a short function
+        can ignore its timeout.
+      </p>
+      <p>
+        Serverless functions can use ordinary databases when their networking and drivers support it.
+        Reuse safe clients where documented, bound connection demand across execution environments
+        and use a suitable pooler, proxy or data API when needed. You do not inherently need to replace
+        the database with a product called “serverless.” See
+        <a href="https://docs.aws.amazon.com/lambda/latest/dg/services-rds.html" target="_blank" rel="noopener noreferrer">Lambda's RDS connection options <span role="img" aria-label="opens in a new tab">↗</span></a>
+        and <a href="https://docs.aws.amazon.com/lambda/latest/dg/best-practices.html" target="_blank" rel="noopener noreferrer">environment reuse guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        WebSockets and other long-lived protocols need a supported connection-lifetime design.
+        Some platforms provide gateways or stateful components to manage them, while a short HTTP
+        handler may be unsuitable. Keep durable state outside disposable execution environments,
+        and handle connection loss, replacement and duplicate events deliberately.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Check runtime and gateway limits separately; a workflow's total lifetime differs from one invocation.</li>
+        <li>Serverless can use conventional databases, with controlled connections and compatible networking.</li>
+        <li>Choose explicit support for persistent protocols and keep durable state outside disposable environments.</li>
+      </ul></div>
+
+      <h2>Choose the next change from evidence</h2>
+      <p>
+        Use the problem, constraints and ownership model to choose an architecture. Serverless can
+        suit event-driven tasks, variable demand and independently triggered operations. A continuously
+        running service may fit steady utilization, particular runtime requirements or a required
+        connection model. Either can serve important user-facing work if its measured behavior and
+        safeguards meet the requirements; latency-sensitive does not automatically mean “never serverless.”
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Observed need</th><th>Candidate to evaluate</th><th>Evidence required</th></tr></thead>
+        <tbody>
+          <tr><td>Application instances need more independent capacity</td><td>Shared required state and appropriate traffic distribution.</td><td>Instance bottlenecks, shared-service headroom and failure behavior.</td></tr>
+          <tr><td>Read load or distant reads dominate</td><td>Replicas, caching or regional placement.</td><td>Read cost, freshness targets and actual end-to-end latency.</td></tr>
+          <tr><td>Database storage or writes exceed one node's viable capacity</td><td>Sharding or a suitable distributed database.</td><td>Key distribution, access patterns, migration and transaction needs.</td></tr>
+          <tr><td>Work can finish after durable acceptance</td><td>Queue-backed asynchronous processing.</td><td>Truthful completion states, handoff durability and worker capacity.</td></tr>
+          <tr><td>Independent releases or workload isolation are needed</td><td>A deliberate service boundary.</td><td>Domain ownership, contracts and operational readiness.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Start with useful logs, latency/error measurements and visibility into critical dependencies.
+        Add tracing, profiling and deeper instrumentation where they answer important questions.
+        Observability supports early diagnosis; it cannot guarantee that no unexpected failure occurs
+        or that every event is captured. Manage sampling, privacy, overhead and cost as part of the design.
+      </p>
+      <p>
+        Prefer a solution the team can understand and operate for the required workload. Complexity
+        can be justified by availability, correctness, isolation or growth needs, not only after every
+        simpler possibility has literally failed. Validate changes with realistic load, failure tests,
+        controlled rollout and recovery exercises. Keep enough headroom for the next known risk and
+        revisit the decision as measurements change.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Match each architectural change to a measured problem and explicit correctness and operational constraints.</li>
+        <li>Choose observable systems the team can operate; complexity needs a concrete benefit.</li>
+        <li>Validate load, failures, costs and recovery, then revisit the design as the workload evolves.</li>
+      </ul></div>
+    </div>
+
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; a study guide for curious engineers.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+
+</div>
+
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</dialog>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>

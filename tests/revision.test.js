@@ -76,6 +76,7 @@ function load(slug, search, options = {}) {
 }
 
 const lessons = load('01-http', '').app.LESSONS;
+let externalResourceLinks = 0;
 assert.deepEqual(Array.from(lessons, lesson => lesson.slug + '.html').sort(),
   fs.readdirSync(path.join(root, 'sections')).filter(file => file.endsWith('.html')).sort(),
   'Every lesson page is registered exactly once');
@@ -85,6 +86,18 @@ for (const lesson of lessons) {
   assert.match(html, /<details class="toc" open>/);
   assert.match(html, /<dialog class="palette-backdrop"/);
   assert.match(html, /class="skip-link" href="#main-content"/);
+  for (const [, attributes, label] of html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    const href = attributes.match(/\bhref\s*=\s*(["'])(.*?)\1/i)?.[2] || '';
+    if (/^(?:https?:)?\/\//i.test(href)) {
+      externalResourceLinks++;
+      assert.match(attributes, /\btarget\s*=\s*(["'])_blank\1/i, lesson.slug + ': resource must open in a new tab');
+      const rel = (attributes.match(/\brel\s*=\s*(["'])(.*?)\1/i)?.[2] || '').split(/\s+/);
+      assert.ok(rel.includes('noopener') && rel.includes('noreferrer'), lesson.slug + ': resource must protect the opener');
+      assert.match(label, /opens in a new tab/i, lesson.slug + ': announce the new tab');
+    } else {
+      assert.doesNotMatch(attributes, /\btarget\s*=\s*(["'])_blank\1/i, lesson.slug + ': chapter navigation stays in the current tab');
+    }
+  }
   const sections = html.split(/<h2\b[^>]*>/).slice(1);
   assert.ok(sections.length, lesson.slug + ': topics exist');
   for (const section of sections) {
@@ -210,4 +223,4 @@ for (const selector of [':root', '[data-theme="dark"]']) {
     }
   }
 }
-console.log(`PASS: ${lessons.length} lessons; summaries, goals, reading modes, navigation at 6 widths, theme preferences, search and contrast.`);
+console.log(`PASS: ${lessons.length} lessons; ${externalResourceLinks} external resources open safely in new tabs; summaries, goals, reading modes, navigation at 6 widths, theme preferences, search and contrast.`);

@@ -145,11 +145,11 @@
       <p>
         Both SIGTERM and SIGINT normally terminate a process unless its handling changes that behavior.
         Registering appropriate handling is what provides a cleanup opportunity. SIGINT can also be
-        sent programmatically; it does not require a keyboard. See the <a href="https://man7.org/linux/man-pages/man7/signal.7.html">Linux signal reference</a>.
+        sent programmatically; it does not require a keyboard. See the <a href="https://man7.org/linux/man-pages/man7/signal.7.html" target="_blank" rel="noopener noreferrer">Linux signal reference <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         A signal does not negotiate extra time. The supervisor defines any grace period and escalation.
-        For example, <a href="https://pm2.keymetrics.io/docs/usage/signals-clean-restart/">PM2's documented stop flow</a>
+        For example, <a href="https://pm2.keymetrics.io/docs/usage/signals-clean-restart/" target="_blank" rel="noopener noreferrer">PM2's documented stop flow <span role="img" aria-label="opens in a new tab">↗</span></a>
         sends SIGINT by default, then SIGKILL if its configurable timeout expires. Do not assume every
         process manager starts with SIGTERM or gives the same amount of time.
       </p>
@@ -157,7 +157,7 @@
         Use your runtime's signal notification or lifecycle facility to trigger normal shutdown code.
         Low-level POSIX signal handlers have strict restrictions on safe operations; arbitrary logging,
         database calls and cleanup should not run directly inside such a handler.
-        See <a href="https://man7.org/linux/man-pages/man7/signal-safety.7.html">signal-handler safety</a>.
+        See <a href="https://man7.org/linux/man-pages/man7/signal-safety.7.html" target="_blank" rel="noopener noreferrer">signal-handler safety <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Handle SIGTERM and SIGINT through one coordinated shutdown path.</li>
@@ -251,13 +251,13 @@ Request B accepted ------------ processing -------- response completed
         signal is sent. Terminating endpoints become unready for regular traffic, and processes still
         running after the grace period face forced termination. Routing and local shutdown proceed
         concurrently, so do not assume instantaneous traffic removal. See the
-        <a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination">Kubernetes termination flow</a>.
+        <a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination" target="_blank" rel="noopener noreferrer">Kubernetes termination flow <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Also verify that signals reach the application in the deployed container. A shell wrapper may
         intercept or fail to forward them. Docker's exec-form <code>ENTRYPOINT</code> or
         <code>CMD</code> avoids an unnecessary shell parent; wrappers and init processes need deliberate
-        forwarding behavior. See <a href="https://docs.docker.com/reference/build-checks/json-args-recommended/">Docker's signal-handling guidance</a>.
+        forwarding behavior. See <a href="https://docs.docker.com/reference/build-checks/json-args-recommended/" target="_blank" rel="noopener noreferrer">Docker's signal-handling guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Coordinate readiness, routing removal and request draining with replacement capacity.</li>
@@ -315,7 +315,7 @@ Request B accepted ------------ processing -------- response completed
         Losing a client connection does not normally corrupt a transactional database. PostgreSQL
         rolls back a transaction still open when the session terminates. However, detecting a disconnect
         can take time, and a statement running in autocommit mode may finish and commit before the
-        disconnect is noticed. See <a href="https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-TERMINATION">PostgreSQL's termination semantics</a>.
+        disconnect is noticed. See <a href="https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-TERMINATION" target="_blank" rel="noopener noreferrer">PostgreSQL's termination semantics <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="callout callout--key">
         <div class="callout-label">Unknown outcome is different from failure</div>
@@ -467,13 +467,13 @@ flush telemetry within its reserved allowance
 exit with the recorded outcome</code></pre>
       </div>
       <p>
-        In Go, <a href="https://pkg.go.dev/os/signal#NotifyContext"><code>signal.NotifyContext</code></a>
+        In Go, <a href="https://pkg.go.dev/os/signal#NotifyContext" target="_blank" rel="noopener noreferrer"><code>signal.NotifyContext</code> <span role="img" aria-label="opens in a new tab">↗</span></a>
         can notify the coordinator by cancelling a context when a registered signal arrives. Use a
         separate, fresh timeout context for shutdown. The returned stop function unregisters the signal
         behavior; deciding whether later interrupts force an exit is part of your signal policy.
       </p>
       <p>
-        <a href="https://pkg.go.dev/net/http#Server.Shutdown"><code>http.Server.Shutdown</code></a>
+        <a href="https://pkg.go.dev/net/http#Server.Shutdown" target="_blank" rel="noopener noreferrer"><code>http.Server.Shutdown</code> <span role="img" aria-label="opens in a new tab">↗</span></a>
         closes listeners and idle connections, then waits for active connections to become idle.
         Its context bounds that wait. An expired context returns an error; it does not itself force
         all remaining handlers to stop. WebSockets and other hijacked connections require separate
@@ -481,7 +481,7 @@ exit with the recorded outcome</code></pre>
         shutdown begins, so the main function must wait for shutdown to finish instead of exiting then.
       </p>
       <p>
-        <a href="https://pkg.go.dev/database/sql#DB.Close"><code>sql.DB.Close</code></a>
+        <a href="https://pkg.go.dev/database/sql#DB.Close" target="_blank" rel="noopener noreferrer"><code>sql.DB.Close</code> <span role="img" aria-label="opens in a new tab">↗</span></a>
         prevents new queries through that handle and waits for queries already processing. It has no
         context parameter, so query deadlines and the surrounding shutdown policy still matter.
         Call it after HTTP handlers and workers no longer need the pool. Check the worker library's

@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scaling &amp; Performance &middot; Backend Principles</title>
+<meta name="description" content="Backend scaling and performance: latency percentiles, throughput, queueing, profiling, tracing, N+1 queries, indexes, connection pools, caching, vertical and horizontal scaling, and capacity testing.">
+<script>
+  (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try {
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell">
+
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 17</p>
+      <h1>Scaling &amp; Performance</h1>
+      <p class="lead">
+        Measure where time and capacity go, identify the limiting resource and improve the system under realistic load.
+        Scaling works best when it follows <strong>evidence about the workload</strong>.
+      </p>
+    </header>
+
+    <div class="prose">
+      <h2>Define the performance boundary</h2>
+      <p>
+        A user clicks a button. The browser sends a request, the backend queries a database or calls
+        another service, a response travels back, and the browser renders the result. The user feels
+        the time across that whole interaction. The backend's handler duration measures only part of it.
+      </p>
+      <div class="msg">
+        <div class="msg-head">One interaction crosses several timing boundaries</div>
+        <pre><code>Click → browser work → network → server queue → application
+                                           → database / external service
+      ← rendering ← network ← response encoding and transfer
+
+User-visible latency: click until useful content appears
+Server latency:       the chosen server-side request boundary
+Database latency:     the chosen query boundary, including any measured waits</code></pre>
+      </div>
+      <p>
+        Define the start, end, workload and success condition before comparing numbers. A fast server
+        response can still accompany a slow page because of network distance, payload size or rendering.
+        A fast failure is also different from completing the user's intended operation.
+      </p>
+      <p>
+        <strong>Performance</strong> describes behavior such as latency, completed work and resource use
+        for a workload. <strong>Scalability</strong> describes how that behavior changes as load or
+        resources grow. Improving one request's execution and increasing the number of simultaneous
+        requests the service can sustain are related goals with different possible remedies.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Define exactly where a latency measurement starts and ends.</li>
+        <li>User-visible time includes network and browser work beyond backend execution.</li>
+        <li>Measure performance at a stated workload and scalability as that workload or capacity changes.</li>
+      </ul></div>
+
+      <h2>Latency is a distribution</h2>
+      <p>
+        Requests take different amounts of time because of cache misses, contention, payloads,
+        dependencies, network conditions and other factors. An average summarizes that distribution
+        but can hide a painful tail. It remains useful for some capacity calculations; it is insufficient
+        as the only description of user experience.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Metric</th><th>Correct interpretation</th></tr></thead>
+        <tbody>
+          <tr><td>P50 = 80 ms</td><td>The median: approximately half the measured requests completed within 80 ms.</td></tr>
+          <tr><td>P90 = 250 ms</td><td>Approximately 90% completed within 250 ms; about 10% were slower.</td></tr>
+          <tr><td>P95 = 400 ms</td><td>Approximately 95% completed within 400 ms; the remaining tail was slower.</td></tr>
+          <tr><td>P99 = 2 s</td><td>Approximately 99% completed within 2 seconds. It does not mean 1% took exactly 2 seconds.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        These are request observations, not necessarily distinct users. One user can make many requests.
+        State the route, time window and population being measured, and separate successes from errors
+        or timeouts when interpreting the results. Tail latency can affect important workflows, but
+        neither customer value nor business complexity can be inferred from a percentile alone.
+        See <a href="https://sre.google/sre-book/monitoring-distributed-systems/" target="_blank" rel="noopener noreferrer">Google SRE's monitoring guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <div class="msg">
+        <div class="msg-head">A small mean can hide slow requests</div>
+        <pre><code>1,000 requests:
+  990 take 50 ms
+   10 take 5,000 ms
+
+Mean = (990 × 50 + 10 × 5,000) / 1,000 = 99.5 ms
+Slow requests = 1% of observations
+At the same ratio over 1,000,000 requests: 10,000 slow requests</code></pre>
+      </div>
+      <p>
+        Under the nearest-rank percentile convention, this example even has P99 of 50 ms; P99.9 is
+        5,000 ms. Percentiles have boundary and sample-size effects, so also count requests exceeding
+        a meaningful latency target. Different estimators and histogram bucket sizes can give different
+        approximations. Do not average per-instance P99 values to claim a fleet-wide P99; aggregate
+        suitable distributions before calculating the percentile. See
+        <a href="https://prometheus.io/docs/practices/histograms/" target="_blank" rel="noopener noreferrer">Prometheus's histogram and summary guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>A percentile is a latency threshold for a measured fraction of requests, not an exact experience shared by that fraction.</li>
+        <li>Track the distribution and slow-request counts alongside the mean and error rate.</li>
+        <li>Use sufficient samples and aggregate distributions correctly across instances.</li>
+      </ul></div>
+
+      <h2>Throughput, concurrency and useful capacity</h2>
+      <p>
+        <strong>Throughput</strong> is completed work per unit of time, often requests per second.
+        <strong>Offered load</strong> is the work arriving or attempted. <strong>Concurrency</strong> is
+        work in progress at a point in time. They are different measurements: a thousand connected
+        users need not generate a thousand requests per second.
+      </p>
+      <p>
+        Report successful completions as well as attempts, failures and rejections. A service returning
+        thousands of immediate errors has high response throughput but little useful capacity. Specify
+        the request mix too: a product lookup, a large export and a payment operation have different costs.
+      </p>
+      <p>
+        Imagine an endpoint meeting its latency target at 100 requests per second. As offered load
+        rises, it may complete more work until a resource saturates. Beyond that point, completion rate
+        can plateau while waiting, timeouts and rejections increase. Under severe overload, useful
+        throughput can fall as retries and abandoned work consume resources.
+      </p>
+      <p>
+        A capacity statement should therefore look like “this workload sustained this arrival rate
+        within these latency and error targets,” with its hardware, data size and test conditions.
+        That is a stronger basis for planning a sale or campaign than a single maximum RPS number.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Distinguish arrivals, successful completions and concurrent work.</li>
+        <li>Capacity depends on request mix and acceptable latency and error rates.</li>
+        <li>Past saturation, waiting and failure can increase even when completed throughput stops growing.</li>
+      </ul></div>
+
+      <h2>Queues, utilization and headroom</h2>
+      <p>
+        An ice-cream worker takes two minutes per order. With nobody ahead of you, your order takes
+        two minutes. With five orders ahead, it takes about twelve minutes if service stays sequential
+        and equally paced. The worker has not slowed down: queueing added ten minutes before your turn.
+      </p>
+      <p>
+        Backend queues form around CPU workers, database connections, locks, storage and downstream
+        services. A request can spend little time doing useful work yet wait a long time for access
+        to one of these resources. Near saturation, bursts and variation often make that waiting rise
+        sharply. The curve is nonlinear; calling it universally exponential would be inaccurate.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Observation</th><th>What to investigate</th></tr></thead>
+        <tbody>
+          <tr><td>High CPU and growing request queues</td><td>CPU work, scheduling, throttling and available execution capacity.</td></tr>
+          <tr><td>Low CPU but long database-pool waits</td><td>Connection occupancy, slow transactions and database capacity.</td></tr>
+          <tr><td>Acceptable averages but bursts of timeouts</td><td>Short-window arrival rates, queue limits and dependency variance.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Utilization is resource-specific: host-wide average CPU can conceal one saturated core,
+        and memory occupancy is not the same phenomenon as a busy CPU. Reaching 100% CPU does not
+        inherently crash a process, but sustained saturation can make an interactive service miss its
+        targets. There is no universal safe utilization range such as 60–80% for every workload.
+      </p>
+      <p>
+        Choose headroom for bursts, scaling delay, maintenance and instance loss. Bound queues and
+        waiting time, limit concurrent expensive work, and reject or defer excess work deliberately.
+        Moving work into an unbounded queue merely changes where overload accumulates. See
+        <a href="https://sre.google/sre-book/handling-overload/" target="_blank" rel="noopener noreferrer">Google SRE's overload guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Response time includes waiting as well as service time.</li>
+        <li>Measure saturation for each resource and reserve workload-specific headroom.</li>
+        <li>Bound concurrency and queues so bursts cannot create unlimited waiting.</li>
+      </ul></div>
+
+      <h2>Find the bottleneck before choosing a remedy</h2>
+      <p>
+        A slow product endpoint does not tell you whether the cause is SQL, logging, serialization
+        or response transfer. Adding a cache because “databases are usually slow” may improve a tiny
+        part of the path while leaving the dominant cost untouched.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Illustrative serial stage</th><th>Measured time</th></tr></thead>
+        <tbody>
+          <tr><td>Database query</td><td>10 ms</td></tr>
+          <tr><td>Application work and encoding</td><td>5 ms</td></tr>
+          <tr><td>Synchronous remote log delivery</td><td>500 ms</td></tr>
+          <tr><td>Total for these stages</td><td>515 ms</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Replacing the 10 ms query with a 5 ms cache hit saves only 5 ms, producing 510 ms for the
+        illustrated path. The remote logging wait deserves attention first. A bounded buffered logging
+        pipeline can remove that wait from the request path, with an explicit overflow and delivery
+        policy. Audit or compliance requirements may call for different durability guarantees.
+      </p>
+      <p>
+        Measure stages with a monotonic clock, correlate observations to a request and compare slow
+        cases with normal ones under similar load. Include connection acquisition, lock waits,
+        serialization, compression, network transfer and dependency calls. Avoid adding synchronous
+        diagnostic work that becomes the new bottleneck.
+      </p>
+      <p>
+        On parallel paths, elapsed time depends on the critical path. Adding every nested span's
+        duration double-counts overlapping work. Optimizing the largest measured contribution is a
+        hypothesis to test, and the limiting resource can move after the improvement.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Measure the slow path before selecting caching, upgrades or additional servers.</li>
+        <li>Prioritize changes that can materially reduce the critical path or release the saturated resource.</li>
+        <li>Re-measure after the change because bottlenecks can move.</li>
+      </ul></div>
+
+      <h2>Use profiles and traces for different questions</h2>
+      <p>
+        A CPU profile samples where the application spends CPU time. It can reveal expensive parsing,
+        serialization, compression, cryptography or business calculations. JSON encoding is computation;
+        transferring the encoded bytes involves I/O. A function can combine both kinds of work.
+      </p>
+      <p>
+        A CPU flame graph groups sampled call stacks. Width represents the amount of the selected
+        measurement attributed to a frame and its descendants; stack height shows call ancestry.
+        Its horizontal axis generally does not show chronological time. A flame chart, by contrast,
+        can preserve a timeline. Inspect inclusive versus self cost and remember that sampling has
+        limits. See <a href="https://www.brendangregg.com/flamegraphs.html" target="_blank" rel="noopener noreferrer">Brendan Gregg's flame graph explanation <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        CPU profiles alone do not explain time spent waiting off CPU for a database or a lock.
+        Wall-clock, blocking, allocation and other profile types answer additional questions.
+        Distributed tracing follows a request through instrumented operations and service calls,
+        showing elapsed spans, errors and parent-child relationships. A database span may include
+        network and client overhead, so its duration is not automatically pure database execution time.
+      </p>
+      <p>
+        Use traces to locate waits and profiles to explain expensive execution, together with database
+        and operating-system metrics. Instrumentation coverage and sampling determine which evidence
+        exists; a missing span does not prove that no work happened. See
+        <a href="https://opentelemetry.io/docs/concepts/signals/traces/" target="_blank" rel="noopener noreferrer">OpenTelemetry's trace concepts <span role="img" aria-label="opens in a new tab">↗</span></a>
+        and <a href="14-observability.html">the observability lesson</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>CPU profiles explain computation; traces and appropriate wait profiles help explain elapsed waiting.</li>
+        <li>Flame graph width reflects aggregated measurements, not the chronological position of a call.</li>
+        <li>Choose the evidence for the question and account for sampling and instrumentation gaps.</li>
+      </ul></div>
+
+      <h2>Remove N plus one query patterns</h2>
+      <p>
+        A blog page fetches N posts, then fetches each post's author in a loop. That is one initial
+        query plus N related lookups: 21 for 20 posts, 101 for 100 posts and 1,001 for 1,000 posts.
+        The same repeated-round-trip pattern can appear between browser and API or between backend
+        and database. An ORM can hide the database version behind ordinary-looking property access.
+      </p>
+      <p>
+        Reusing a connection avoids connection setup, but each query still has execution, communication
+        and result-handling costs. A thousand sequential operations taking 5 ms each contribute roughly
+        five seconds. Running them all concurrently may reduce elapsed time but can overwhelm the
+        database; it does not remove unnecessary work.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Fetch a bounded page and its many-to-one author relation together</div>
+        <pre><code>SELECT p.id, p.title, u.name AS author_name
+FROM posts AS p
+JOIN users AS u ON u.id = p.author_id
+WHERE p.tenant_id = $1
+ORDER BY p.created_at DESC, p.id DESC
+LIMIT $2;</code></pre>
+      </div>
+      <p>
+        Another design fetches the bounded post page, collects its distinct author IDs, and fetches
+        those authors in one batch before assembling the response. Keep authorization and tenant
+        restrictions on every access path. Choose a left join if posts without an author must remain
+        in the result; the example's inner join excludes them.
+      </p>
+      <p>
+        ORMs provide eager-loading and prefetch mechanisms. Django's <code>select_related</code>
+        follows supported single-valued relationships with a join; <code>prefetch_related</code> uses
+        additional queries for suitable relationships. Inspect generated SQL and query counts rather
+        than assuming the ORM always uses one query. See the <a href="https://docs.djangoproject.com/en/stable/ref/models/querysets/#select-related" target="_blank" rel="noopener noreferrer">Django QuerySet reference <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Bulk fetching still needs limits. Large ID lists may need batching, and joining several
+        one-to-many relationships can multiply result rows and complicate pagination. Aim for bounded,
+        efficient work for the required page, rather than loading the entire database in one request.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Detect repeated related lookups through traces, query counts and generated SQL.</li>
+        <li>Use suitable joins or bounded bulk prefetching instead of per-item queries.</li>
+        <li>Preserve pagination and authorization, and account for join row multiplication.</li>
+      </ul></div>
+
+      <h2>Indexes follow access patterns</h2>
+      <p>
+        An index is an additional data structure that helps the database locate relevant rows or
+        produce a useful order. A B-tree is common for equality, range and ordering operations.
+        Other index types serve different access patterns. The library-catalog analogy is useful:
+        an organized lookup can avoid inspecting every book, but not every question needs the same catalog.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Illustrative PostgreSQL index for an author lookup</div>
+        <pre><code>CREATE INDEX posts_author_id_idx ON posts (author_id);
+
+SELECT id, title
+FROM posts
+WHERE author_id = 42;</code></pre>
+      </div>
+      <p>
+        Whether this improves the query depends on selectivity, table size, data distribution,
+        existing indexes, caching and the chosen plan. A sequential scan can be efficient for a small
+        table or a query needing much of a large one. There is no fixed “millions of rows means four
+        seconds” rule, and an index scan is not automatically faster for every workload.
+      </p>
+      <p>
+        Indexes occupy storage and cache space and add write-maintenance work. Indexing every column
+        can slow writes and increase operational costs. Include known important lookup and constraint
+        requirements in the initial design, then refine indexes from actual query plans and workload
+        measurements. Index creation itself also needs deployment planning on busy tables.
+      </p>
+      <p>
+        PostgreSQL automatically creates indexes for primary-key and unique constraints. It does not
+        automatically index every referencing foreign-key column. Inspect the schema before adding
+        duplicate indexes and assess foreign-key lookup and modification patterns. See
+        <a href="https://www.postgresql.org/docs/current/ddl-constraints.html" target="_blank" rel="noopener noreferrer">PostgreSQL's constraint documentation <span role="img" aria-label="opens in a new tab">↗</span></a>
+        and <a href="08-databases.html">the database lesson</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Choose indexes for actual filters, joins, ordering and constraints.</li>
+        <li>Weigh read improvements against storage, cache footprint and write-maintenance cost.</li>
+        <li>Inspect existing indexes and plans; a sequential scan can be the appropriate choice.</li>
+      </ul></div>
+
+      <h2>Composite and covering indexes</h2>
+      <p>
+        A <strong>composite index</strong> has multiple key columns. For queries filtering by user and
+        returning recent orders, an index beginning with user ID and then creation time can help both
+        filtering and ordering. Separate single-column indexes need not provide the same benefit.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Example composite index, with deterministic ordering</div>
+        <pre><code>CREATE INDEX orders_user_created_idx
+ON orders (user_id, created_at DESC, id DESC);
+
+SELECT id, created_at
+FROM orders
+WHERE user_id = $1
+ORDER BY created_at DESC, id DESC
+LIMIT $2;</code></pre>
+      </div>
+      <p>
+        Leading columns matter for a B-tree's efficient search range. This design is useful for a
+        user-specific lookup; it does not automatically make a creation-time-only query equally
+        efficient. Avoid the absolute rule that a later-column query can never use the index:
+        PostgreSQL can choose strategies such as skip scans when beneficial. Verify the actual plan.
+        See <a href="https://www.postgresql.org/docs/current/indexes-multicolumn.html" target="_blank" rel="noopener noreferrer">PostgreSQL's multicolumn index guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        A <strong>covering index</strong> contains all the column values a particular query requires,
+        including any extra output values. In PostgreSQL, INCLUDE adds non-key payload columns.
+        Composite and covering describe different properties; one index can be both.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Example covering design for a department directory</div>
+        <pre><code>CREATE INDEX departments_name_idx
+ON departments (name) INCLUDE (id);
+
+SELECT id, name
+FROM departments
+ORDER BY name;</code></pre>
+      </div>
+      <p>
+        This makes the requested values available in the index, but an index-only scan can still
+        need table visits to check row visibility. PostgreSQL's visibility map affects that benefit,
+        particularly on frequently changing tables. Extra payload columns also enlarge the index.
+        See <a href="https://www.postgresql.org/docs/current/indexes-index-only-scans.html" target="_blank" rel="noopener noreferrer">index-only scans and covering indexes <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Composite key order should match the important filtering and ordering patterns.</li>
+        <li>A covering index supplies the columns needed by a query; it can also be composite.</li>
+        <li>Check actual scan behavior, visibility-related heap visits and index size.</li>
+      </ul></div>
+
+      <h2>Read the execution plan</h2>
+      <p>
+        A trace can identify the slow query. A database execution plan then helps explain how that
+        query finds and combines rows. In PostgreSQL, EXPLAIN shows the planned strategy; adding
+        ANALYZE runs the query and records actual execution observations.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Illustrative read query to inspect in a suitable test environment</div>
+        <pre><code>EXPLAIN (ANALYZE, BUFFERS)
+SELECT id, title
+FROM posts
+WHERE author_id = 42
+ORDER BY created_at DESC
+LIMIT 20;</code></pre>
+      </div>
+      <p>
+        Compare estimated and actual row counts, repeated loop counts, scan types, join strategies,
+        sorts and buffer activity. Large estimate errors can point to statistics or data-distribution
+        issues. A query returning only twenty rows may still inspect or sort many more.
+        Planner cost units are estimates, not milliseconds, and parent-node timings can include child work.
+      </p>
+      <p>
+        EXPLAIN ANALYZE really executes the statement, including writes and other side effects when
+        present. Choose a suitable environment and operation before using it. Its instrumentation
+        also has overhead. See <a href="https://www.postgresql.org/docs/current/using-explain.html" target="_blank" rel="noopener noreferrer">PostgreSQL's EXPLAIN documentation <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        After changing a query, index or statistics, compare the new plan and measured latency under
+        equivalent conditions. Keep data volume, parameter distribution and cache warmth in view.
+        Do not force an index merely to remove “sequential scan” from a plan; verify reduced work and
+        improvement for the real workload, including write behavior where relevant.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use traces to locate a query and execution plans to understand its database work.</li>
+        <li>EXPLAIN ANALYZE executes the statement; distinguish estimates, actuals and instrumentation cost.</li>
+        <li>Compare workload results before and after changes rather than optimizing for a particular plan label.</li>
+      </ul></div>
+
+      <h2>Reuse connections and budget the pool</h2>
+      <p>
+        Creating a database connection can require network establishment, TLS negotiation,
+        authentication and database session resources. Repeating that process for every query wastes
+        time and capacity. A connection pool maintains reusable connections: an operation borrows one,
+        uses it, then returns it instead of closing the underlying connection each time.
+      </p>
+      <p>
+        Drivers commonly provide a pool inside each application process. Its maximum size is a limit
+        on that process, not on the entire deployment. Count API replicas, worker processes, scheduled
+        jobs, deployment overlap and other clients when calculating possible database demand.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Illustrative connection budget, not a recommended default</div>
+        <pre><code>Database connection budget:             300
+Reserved for operations and other work:  60
+Available to this application's replicas: 240
+Maximum simultaneous replicas:            8
+Example per-replica pool ceiling:         30
+
+8 × 30 = 240
+Include rollout overlap in the maximum replica count.</code></pre>
+      </div>
+      <p>
+        The effective safe limit may be lower than the connection configuration because active
+        queries contend for CPU, memory, storage and locks. PostgreSQL's max_connections is
+        configurable; it is not universally 400 or 500. Hitting the limit normally rejects additional
+        connections rather than inherently crashing the database. Excessive work can still overload
+        it. See <a href="https://www.postgresql.org/docs/current/runtime-config-connection.html" target="_blank" rel="noopener noreferrer">PostgreSQL connection settings <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        When the pool is full, callers wait or fail according to its policy. Measure acquisition wait,
+        active and idle counts, timeouts, and how long transactions hold connections. Bound waits and
+        release connections reliably. A larger pool can move the queue into the database and make
+        performance worse; first investigate slow work, leaks and unnecessary occupancy.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Reuse database connections through a pool and return them reliably.</li>
+        <li>Budget aggregate connections across all processes, replicas and deployment overlap.</li>
+        <li>Measure pool waiting and database saturation before increasing limits.</li>
+      </ul></div>
+
+      <h2>Application pools and external poolers</h2>
+      <p>
+        An external pooler such as PgBouncer sits between clients and PostgreSQL. It can reuse a
+        controlled set of database-side connections across many application clients. Application
+        pools and an external pooler can coexist; adding the external layer is an operational choice,
+        not a universal requirement for every production service.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>PgBouncer mode</th><th>When the server connection is assigned</th><th>Implication</th></tr></thead>
+        <tbody>
+          <tr><td>Session</td><td>For the client session.</td><td>Preserves session behavior but offers less multiplexing for long-lived clients.</td></tr>
+          <tr><td>Transaction</td><td>For an active transaction.</td><td>Can share connections more effectively; check compatibility with session-dependent features.</td></tr>
+          <tr><td>Statement</td><td>For a statement.</td><td>Disallows multi-statement transactions; appropriate only for compatible workloads.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Check the <a href="https://www.pgbouncer.org/features.html" target="_blank" rel="noopener noreferrer">PgBouncer compatibility table <span role="img" aria-label="opens in a new tab">↗</span></a>
+        for the selected mode and version. Do not assume session settings, temporary state or prepared
+        statement behavior remain identical when successive transactions can use different database
+        connections.
+      </p>
+      <p>
+        An external pooler still needs limits, timeouts, monitoring and availability planning. Pools
+        may be divided by database and user, and several pooler instances can collectively exceed a
+        database's budget. Account for all of them; one pool-size setting is not automatically a
+        global cap. See <a href="https://www.pgbouncer.org/config.html" target="_blank" rel="noopener noreferrer">PgBouncer's connection-limit configuration <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Pooling reduces connection churn and controls admission. It does not increase the database's
+        inherent query-processing capacity. Too many clients can still accumulate waiting or receive
+        errors even when the database-side connection limit is respected.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>External poolers can share database connections across application instances.</li>
+        <li>Choose a pooling mode compatible with transaction and session behavior.</li>
+        <li>Budget all pooler instances and pools; pooling still needs overload and availability policies.</li>
+      </ul></div>
+
+      <h2>Cache the work that matters</h2>
+      <p>
+        Caching reuses a result instead of repeating work. It can help expensive reads, computation,
+        external calls or content delivery when reuse is likely and the freshness policy is acceptable.
+        Choose it from measurements and data semantics; it need not always be the last optimization,
+        and it is not automatically useful for every slow endpoint.
+      </p>
+      <p>
+        The <strong>cache hit rate</strong> is hits divided by relevant cache lookups. State whether
+        you are measuring object lookups, requests served entirely from cache or bytes. A request can
+        need several objects, so those ratios need not match. Segment the metric by cache tier and
+        workload without creating unbounded metric labels.
+      </p>
+      <div class="msg">
+        <div class="msg-head">A simplified mean-latency model</div>
+        <pre><code>Mean lookup latency ≈ hit_fraction × hit_time
+                    + miss_fraction × total_miss_time
+
+90% hits at 5 ms, 10% misses taking 105 ms in total:
+  0.90 × 5 + 0.10 × 105 = 15 ms
+
+The miss time includes the cache lookup and source fetch.
+This model estimates a mean; it does not predict P99.</code></pre>
+      </div>
+      <p>
+        A high hit rate can reduce source load substantially, but hit rate alone is not the goal.
+        Missing an expensive query can matter more than hitting many cheap ones. A low ratio may
+        reflect mostly unique data rather than a broken implementation. Track miss cost, saved work,
+        eviction, memory use, stale responses and source load alongside latency.
+      </p>
+      <p>
+        TTL, capacity, eviction policy and access patterns affect reuse. A seven-day TTL can be
+        reasonable for immutable or versioned content and unacceptable for other data; duration alone
+        does not determine correctness. See <a href="09-caching.html">the caching lesson</a> for
+        storage and eviction fundamentals.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Cache measured expensive work when reuse and freshness requirements justify it.</li>
+        <li>Define the hit-rate denominator and inspect cost, latency and correctness as well as the ratio.</li>
+        <li>A mean-latency model does not predict tail behavior or guarantee useful caching.</li>
+      </ul></div>
+
+      <h2>Invalidation is a consistency problem</h2>
+      <p>
+        A cached profile becomes stale when the underlying profile changes. With several application
+        instances, browser caches, proxies and CDNs, one update can require coordinating multiple
+        copies. Decide how much staleness each operation permits before choosing an invalidation mechanism.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Mechanism</th><th>How it works</th><th>Limit</th></tr></thead>
+        <tbody>
+          <tr><td>Time-based expiry</td><td>Refresh after a configured TTL.</td><td>Old data may be served until expiry; synchronized expiry can create bursts.</td></tr>
+          <tr><td>Event-driven invalidation</td><td>Invalidate or replace affected entries after a committed change.</td><td>Events can be delayed, missed or delivered out of order.</td></tr>
+          <tr><td>Versioned data or keys</td><td>Distinguish revisions so older results cannot replace newer ones under the chosen protocol.</td><td>Requires consistent version selection and cleanup of obsolete entries.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        A basic cache-aside update commonly commits the database change and then invalidates the cache.
+        Deleting first allows a reader to repopulate the old value before the write commits. Even the
+        commit-then-delete order is not a complete concurrency guarantee: a reader that fetched old
+        data earlier can populate it after invalidation. Another failure window exists if the writer
+        crashes after commit but before deleting the cache entry.
+      </p>
+      <p>
+        Depending on the consistency requirement, combine expiry, reliable change events, version
+        checks or a stronger read/write protocol. A durable outbox can help publish invalidation intent
+        after a database commit, but consumers still need ordering and retry handling. Do not claim
+        that deleting an entry in each update handler eliminates every stale-data race. See
+        <a href="https://learn.microsoft.com/en-us/azure/architecture/patterns/cache-aside" target="_blank" rel="noopener noreferrer">Microsoft's cache-aside guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Missing one write path, bulk import or administrative update can leave stale data behind.
+        Document all writers and the behavior when the cache is unavailable. Fresh authorization or
+        payment decisions may require a different policy from a slightly stale product description.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Define acceptable staleness before choosing TTLs and invalidation events.</li>
+        <li>Commit-then-invalidate helps, but concurrent readers and partial failures still create races.</li>
+        <li>Include every writer and use reliable propagation or versioning where stronger freshness is required.</li>
+      </ul></div>
+
+      <h2>Local, shared and tiered caches</h2>
+      <p>
+        A local cache lives in an application process, often in a bounded map or cache library. It
+        avoids a network hop, but every instance has its own copy. A shared remote cache such as Redis,
+        Valkey or Memcached can serve many instances through a common interface; the service itself
+        may also use replication or partitioning.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Placement</th><th>Benefit</th><th>Operational cost</th></tr></thead>
+        <tbody>
+          <tr><td>Local</td><td>Fast access without a remote request.</td><td>Duplicated memory, per-instance warmup and cross-instance invalidation.</td></tr>
+          <tr><td>Shared remote</td><td>Common cache state and reusable capacity across clients.</td><td>Network, serialization, availability and service-management overhead.</td></tr>
+          <tr><td>Tiered</td><td>A local hot set backed by a larger shared cache.</td><td>Several freshness policies and more complicated invalidation.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Shared storage reduces independent copies but does not automatically make cached data consistent
+        with the database or eliminate replica lag. Neither local nor remote access has a universal
+        millisecond floor. Measure topology, client behavior, serialization and payload size instead
+        of assuming a remote cache costs at least 50 ms.
+      </p>
+      <p>
+        Bound local memory and choose admission and eviction policies for the hot working set.
+        Multiple tiers need an explicit freshness contract. Include tenant, permissions, query options
+        and data version in cache identity where they affect the result, and never let one user's
+        cached response bypass another user's authorization.
+      </p>
+      <p>
+        Plan for cold starts and cache loss. Coalesce concurrent misses for the same key where
+        appropriate, spread expirations with jitter, and ensure a sudden miss burst cannot flood
+        the source. Serving stale data during refresh is an option only when the operation permits it.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Choose local, remote or tiered caching from measured latency, reuse and consistency requirements.</li>
+        <li>A shared cache does not remove database/cache consistency problems.</li>
+        <li>Bound memory, isolate cache keys correctly and protect the source from miss bursts.</li>
+      </ul></div>
+
+      <h2>Cache-aside, write-through and write-behind</h2>
+      <p>
+        Caching patterns describe responsibility for loading and updating cached data. Product terminology
+        can vary, so specify which system stores a write, which step must succeed before acknowledgement
+        and what happens when only part of the workflow succeeds.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Pattern</th><th>Typical flow</th><th>Main tradeoff</th></tr></thead>
+        <tbody>
+          <tr><td>Cache-aside</td><td>Read cache; on miss load the source, populate cache and return. Writes update the source and invalidate or refresh affected entries.</td><td>Simple demand-driven population, with miss overhead and consistency races.</td></tr>
+          <tr><td>Write-through</td><td>Keep source and cache updates in the synchronous write path according to the implementation's acknowledgement contract.</td><td>More proactive cache freshness, with additional write work and partial-failure handling.</td></tr>
+          <tr><td>Write-behind / write-back</td><td>Acknowledge through the cache or write buffer, then persist to the backing store asynchronously.</td><td>Potentially faster acknowledgements or batched writes, with durability, ordering and recovery requirements.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Write-through does not guarantee every read hits: entries can expire or be evicted, reads can
+        precede writes, and other writers can bypass the path. Updating a database and cache is also
+        not automatically an atomic transaction across both services. Define how to reconcile a
+        database success followed by a cache failure. See <a href="https://docs.aws.amazon.com/whitepapers/latest/database-caching-strategies-using-redis/caching-patterns.html" target="_blank" rel="noopener noreferrer">AWS's cache-aside and write-through descriptions <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Write-behind changes when a write becomes durable in the backing database. If acknowledgement
+        depends only on volatile memory, a failure can lose an accepted write. A production design may
+        need durable buffering, replay, idempotency, ordering and a way to expose persistence lag and
+        failures. Moving the write off the request path does not remove the obligation to complete it.
+        See <a href="10-background-jobs.html">durable background work</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Define loading, update ownership and acknowledgement semantics for the selected caching pattern.</li>
+        <li>Write-through still needs miss and partial-failure handling.</li>
+        <li>Write-behind needs explicit durability, replay and ordering guarantees for acknowledged writes.</li>
+      </ul></div>
+
+      <h2>Vertical scaling: increase a machine's capacity</h2>
+      <p>
+        Vertical scaling, or scaling up, gives an instance more suitable resources: CPU capacity,
+        memory, storage throughput or network bandwidth. Moving to faster storage can help an I/O
+        bottleneck; more memory can accommodate a larger useful working set. Extra disk capacity
+        alone does not necessarily make existing queries faster.
+      </p>
+      <p>
+        This can be a practical improvement with relatively little architectural change. It does not
+        guarantee proportional gains. Doubling CPU cores helps only work that can use them; a serial
+        execution path, lock or remote dependency can remain unchanged. More RAM has different value
+        depending on allocation, cache effectiveness and the application's memory limits.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Advantage</th><th>Limit to assess</th></tr></thead>
+        <tbody>
+          <tr><td>Fewer instances to coordinate</td><td>A larger instance may still need runtime, pool and operating-system tuning.</td></tr>
+          <tr><td>Can remove a measured local resource bottleneck</td><td>Hardware, provider quotas and available instance sizes impose ceilings.</td></tr>
+          <tr><td>May simplify operations for the required workload</td><td>Price and replacement downtime depend on the platform and deployment.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        If the architecture has only one serving instance, it remains a failure domain regardless of
+        its size. Redundancy can be added alongside larger machines; vertical and horizontal scaling
+        are compatible choices. More powerful hardware in one region also does not erase the network
+        distance to users or dependencies in another region.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Scale up the resource that measurements show is limiting the workload.</li>
+        <li>More cores, RAM or storage do not guarantee proportional throughput gains.</li>
+        <li>Account for ceilings, cost, replacement behavior and the remaining failure domains.</li>
+      </ul></div>
+
+      <h2>Horizontal scaling: distribute work across instances</h2>
+      <p>
+        Horizontal scaling, or scaling out, adds instances that share the workload. If one instance
+        sustains 1,000 requests per second, five can approach 5,000 only when work is independently
+        distributable and the rest of the system can support that total load. It is a conditional
+        capacity model, not a guarantee.
+      </p>
+      <p>
+        A shared database, serialized transaction, hot key, downstream quota or network link can limit
+        the fleet. Additional replicas may increase contention and multiply connection demand without
+        improving successful throughput. Coordination, quotas, cost and operational capacity also
+        prevent scale-out from being literally unlimited. See <a href="https://learn.microsoft.com/en-us/azure/architecture/guide/design-principles/scale-out" target="_blank" rel="noopener noreferrer">Microsoft's scale-out design guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Redundancy can improve availability, but losing a replica is not automatically invisible.
+        In-flight work may fail, health detection takes time, and surviving instances need spare
+        capacity for redistributed load. Shared services can remain failure points. Test those
+        conditions and use safe retry and idempotency policies.
+      </p>
+      <p>
+        Autoscaling needs an appropriate signal, bounds and time to react. CPU can be useful for a
+        CPU-limited worker, while queue age, concurrency or other measurements may better represent
+        a different workload. Provisioning, startup, connection establishment and cache warmup take
+        time. Scaling in must drain work before removing capacity; see
+        <a href="15-graceful-shutdown.html">graceful shutdown</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Scale-out gains depend on distributable work and sufficient shared-service capacity.</li>
+        <li>Plan for detection delays, interrupted work and spare capacity after an instance fails.</li>
+        <li>Choose workload-relevant scaling signals and allow for startup and drain time.</li>
+      </ul></div>
+
+      <h2>Routing, shared state and geographic tradeoffs</h2>
+      <p>
+        A load balancer distributes work across available backends using its configured policy.
+        Even request counts do not necessarily mean even resource use: requests vary in cost,
+        connections vary in lifetime, and machines can have different effective capacity. Health and
+        readiness checks help decide where new traffic should go. See
+        <a href="https://sre.google/sre-book/load-balancing-datacenter/" target="_blank" rel="noopener noreferrer">Google SRE's load-balancing discussion <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Make instance-local assumptions explicit. An in-memory session, local uploaded file or scheduled
+        timer exists only where it was created. Shared session storage, object storage and coordinated
+        job ownership can make requests less dependent on one machine. “Stateless application instances”
+        means request handling does not rely on hidden local state that another instance lacks; the
+        application still has business state somewhere.
+      </p>
+      <p>
+        When instances read the same authoritative database, a user update need not be manually copied
+        into every process. Their local caches may still need invalidation. Duplicated workers or
+        schedulers also need ownership and idempotency so adding replicas does not multiply side effects.
+      </p>
+      <p>
+        Placing application instances near users can reduce one network leg. If every request still
+        visits a distant primary database, that round trip remains. Multi-region replicas, caches and
+        write routing introduce freshness, conflict, failover and data-placement decisions. Geographic
+        distribution is therefore an architectural choice, not an automatic consequence of adding servers.
+      </p>
+      <p>
+        A network partition can leave some components running while unable to communicate. Decide
+        which operations must stop to preserve correctness and which may proceed under a defined
+        consistency policy. Retries should be bounded and safe. More machines exchange some local
+        capacity limits for coordination and failure-handling work.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Route by an appropriate policy and readiness; request counts alone do not describe load.</li>
+        <li>Identify local sessions, files, caches and job ownership before adding instances.</li>
+        <li>Regional proximity helps only the paths moved closer; distributed state needs explicit consistency and failure policies.</li>
+      </ul></div>
+
+      <h2>Validate capacity through repeatable experiments</h2>
+      <p>
+        Begin with a user-facing target, such as a latency threshold and acceptable error rate for a
+        stated request mix. Capture a baseline, identify the limiting resource, make a focused change
+        and repeat the measurement. Include operating cost and correctness in the comparison, not
+        just the best single timing.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Test condition</th><th>What it should reveal</th></tr></thead>
+        <tbody>
+          <tr><td>Increasing arrival rate</td><td>Where latency, queueing and failures begin violating the target.</td></tr>
+          <tr><td>Short bursts</td><td>Whether headroom, queue bounds and scaling delay match actual demand.</td></tr>
+          <tr><td>Cold and warm caches</td><td>Whether advertised capacity depends on an unrealistically perfect hit rate.</td></tr>
+          <tr><td>Representative data and users</td><td>Effects of table size, hot keys, tenancy, query selectivity and payload distribution.</td></tr>
+          <tr><td>Longer sustained load</td><td>Leaks, growing queues, connection retention and resource trends missed by a short run.</td></tr>
+          <tr><td>Replica or dependency failure</td><td>Useful capacity, safe degradation and recovery under reduced resources.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Confirm that the load generator reaches the intended arrival rate and has its own spare
+        capacity. If it waits for slow responses before sending more work, it can unintentionally
+        reduce the offered load and hide overload. Record attempts, completions, errors, timeouts,
+        percentiles, queue waits and resource saturation over the same interval.
+      </p>
+      <p>
+        Keep test conditions comparable: environment, software configuration, data, network placement,
+        connection reuse and cache state. Repeat enough to distinguish an improvement from ordinary
+        variation. Synthetic results still need verification through production telemetry and controlled
+        rollout because real request mixes and dependencies can differ.
+      </p>
+      <p>
+        The useful decision is specific: optimize this query, reduce this payload, bound this queue,
+        improve this resource or add these replicas for a demonstrated need. Performance work becomes
+        manageable when each change has a measurable purpose and a verified outcome.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>State workload and latency/error targets before measuring capacity.</li>
+        <li>Test bursts, cache states, sustained load and reduced-capacity failures under comparable conditions.</li>
+        <li>Measure before and after each focused change, then confirm the result in the real deployment.</li>
+      </ul></div>
+    </div>
+
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; a study guide for curious engineers.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+
+</div>
+
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</dialog>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>

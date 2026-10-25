@@ -169,7 +169,7 @@ Client ← HTTP response ← handler ← service ← result</code></pre>
         <code>202</code> for accepted but unfinished work, or <code>204 No Content</code> when completed
         without a response body. A 204 is still an HTTP response. DELETE request bodies have no
         generally defined semantics; an identifier in the target URL is usually clearer.
-        <a href="https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.5">HTTP specification: DELETE</a>.
+        <a href="https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.5" target="_blank" rel="noopener noreferrer">HTTP specification: DELETE <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Extract → bind/decode → validate/transform → call service → map and send the response.</li>
@@ -277,7 +277,7 @@ Client ← HTTP response ← handler ← service ← result</code></pre>
         enters error handling. A middleware that neither responds nor continues leaves the request
         hanging. Once it sends a final response, it should stop its own execution instead of
         continuing into another response. Other frameworks may use wrappers or an awaited next
-        handler instead. <a href="https://expressjs.com/en/guide/using-middleware/">Express middleware guide</a>.
+        handler instead. <a href="https://expressjs.com/en/guide/using-middleware/" target="_blank" rel="noopener noreferrer">Express middleware guide <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Middleware centralizes recurring request/response work and can apply globally or per route.</li>
@@ -308,7 +308,7 @@ Client ← HTTP response ← handler ← service ← result</code></pre>
           preflight prevents the subsequent actual request. Non-browser clients do not enforce this
           policy and can choose their own Origin header. Keep authentication, authorization and
           appropriate CSRF defenses independent of CORS.
-          <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS">MDN: how CORS works</a>.</p>
+          <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS" target="_blank" rel="noopener noreferrer">MDN: how CORS works <span role="img" aria-label="opens in a new tab">↗</span></a>.</p>
       </div>
       <p>
         Rate limits also depend on deployment details. Trust forwarded client-IP headers only from
@@ -341,14 +341,14 @@ Client ← HTTP response ← handler ← service ← result</code></pre>
         handle. Errors must reach that chain: asynchronous callbacks may need explicit forwarding,
         while rejected promises depend on the framework's support. Also, returning from
         <code>next()</code> does not generally mean an asynchronous response has finished.
-        <a href="https://expressjs.com/en/guide/error-handling/">Express error-handling guide</a>.
+        <a href="https://expressjs.com/en/guide/error-handling/" target="_blank" rel="noopener noreferrer">Express error-handling guide <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         In an onion-style pipeline such as Koa, an outer middleware awaits the next one and resumes
         on the way back out. An error boundary can wrap downstream work with a try/catch, so it is
         placed outside that work rather than simply registered last. The principle is to cover the
         operations that can fail using the framework's actual control flow.
-        <a href="https://koajs.com/#cascading">Koa's cascading middleware</a>.
+        <a href="https://koajs.com/#cascading" target="_blank" rel="noopener noreferrer">Koa's cascading middleware <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <h3>Turn failures into a stable public contract</h3>
       <p>
@@ -415,7 +415,7 @@ Each handler reads the context associated with its own request.</code></pre>
       <p>
         Nor is every context a mutable dictionary. For example, Go derives contexts carrying values,
         deadlines and cancellation from a parent; callers pass the derived context onward.
-        <a href="https://pkg.go.dev/context">Go context documentation</a>.
+        <a href="https://pkg.go.dev/context" target="_blank" rel="noopener noreferrer">Go context documentation <span role="img" aria-label="opens in a new tab">↗</span></a>.
         Keep business input explicit and context small so it does not become a hidden container for
         every dependency, raw payload and secret.
       </p>
@@ -497,7 +497,7 @@ req-7f21  POST /books          completed with 201</code></pre>
         Cancellation is cooperative: code and drivers must observe it. It does not forcibly undo
         completed work or roll back an already committed write. Release associated timers and other
         resources when work ends. Go's context API provides parent/child propagation for these signals.
-        <a href="https://pkg.go.dev/context">Go deadlines and cancellation</a>.
+        <a href="https://pkg.go.dev/context" target="_blank" rel="noopener noreferrer">Go deadlines and cancellation <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Work that intentionally outlives the request needs an explicit lifecycle, often a queued

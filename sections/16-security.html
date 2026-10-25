@@ -138,7 +138,7 @@ return only the application's allowed response fields</code></pre>
         SQL syntax; this is not equivalent to manually inserting escaped text. Placeholder syntax
         varies by driver. Parameters usually cannot stand for table names, column names or sort
         directions, so choose those from a server-controlled allowlist. ORMs also require care around
-        raw SQL escape hatches. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html">OWASP's SQL injection defenses</a>.
+        raw SQL escape hatches. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html" target="_blank" rel="noopener noreferrer">OWASP's SQL injection defenses <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Validation remains useful, but banning apostrophes is not a SQL injection defense: legitimate
@@ -176,7 +176,7 @@ execute the fixed filter through the database driver</code></pre>
       </p>
       <p>
         SQL and NoSQL both need these boundaries. A database category is neither a security guarantee
-        nor an inherent reason an application is insecure. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/NoSQL_Security_Cheat_Sheet.html">OWASP's NoSQL guidance</a>
+        nor an inherent reason an application is insecure. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/NoSQL_Security_Cheat_Sheet.html" target="_blank" rel="noopener noreferrer">OWASP's NoSQL guidance <span role="img" aria-label="opens in a new tab">↗</span></a>
         and the earlier <a href="05-validation.html">validation lesson</a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
@@ -196,7 +196,7 @@ execute the fixed filter through the database driver</code></pre>
         Prefer an application library when it removes the need to launch a command. Otherwise use a
         fixed executable and an API that accepts an argument array without invoking a shell. Keep
         executable selection and options under application control. See
-        <a href="https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html">OWASP's command injection defenses</a>.
+        <a href="https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html" target="_blank" rel="noopener noreferrer">OWASP's command injection defenses <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="callout callout--warn">
         <div class="callout-label">No shell is only part of the boundary</div>
@@ -236,14 +236,14 @@ execute the fixed filter through the database driver</code></pre>
         framework; OpenID Connect defines an identity layer. Validate the configured issuer, audience,
         protocol state and tokens through the provider's supported integration. Identify an external
         identity using its trusted issuer and subject, not a client-supplied email alone.
-        See <a href="https://openid.net/specs/openid-connect-core-1_0.html">OpenID Connect Core</a>.
+        See <a href="https://openid.net/specs/openid-connect-core-1_0.html" target="_blank" rel="noopener noreferrer">OpenID Connect Core <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Account linking deserves special care: matching email text does not prove ownership of both
         accounts. Use a deliberate linking flow that verifies control of the relevant identities.
         Password reset and email-change flows must not provide easier account takeover paths than login.
         Prefer generic credential-error messages that avoid revealing whether an account exists, and
-        add reauthentication or MFA for sensitive changes. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html">OWASP's authentication guidance</a>.
+        add reauthentication or MFA for sensitive changes. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html" target="_blank" rel="noopener noreferrer">OWASP's authentication guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Authentication includes recovery, linking, session management and revocation, not just login.</li>
@@ -281,7 +281,7 @@ execute the fixed filter through the database driver</code></pre>
       <p>
         A rainbow table is a particular precomputation technique, not simply a name for every password
         dictionary. Salted password hashing blocks reuse of generic precomputed results; it does not
-        make recovery of a weak password impossible. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html">OWASP's password storage guidance</a>.
+        make recovery of a weak password impossible. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html" target="_blank" rel="noopener noreferrer">OWASP's password storage guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Store salted password verifiers through a maintained password-hashing library.</li>
@@ -299,7 +299,7 @@ execute the fixed filter through the database driver</code></pre>
         OWASP recommends Argon2id for new password storage, with a listed minimum configuration of
         19 MiB memory, two iterations and parallelism one. Its guidance includes scrypt when Argon2id
         is unavailable, bcrypt for legacy systems and PBKDF2 for appropriate compliance requirements.
-        Treat these as a starting point and consult the <a href="https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#password-hashing-algorithms">current algorithm guidance</a>
+        Treat these as a starting point and consult the <a href="https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#password-hashing-algorithms" target="_blank" rel="noopener noreferrer">current algorithm guidance <span role="img" aria-label="opens in a new tab">↗</span></a>
         when implementing or upgrading storage.
       </p>
       <p>
@@ -345,7 +345,7 @@ execute the fixed filter through the database driver</code></pre>
         Enforce server-side idle and absolute expirations, invalidate sessions on logout or compromise,
         and keep any replicated or cached revocation state consistent with the promised revocation
         delay. Multiple application instances can share a session store; horizontal scaling does not
-        require JWTs. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html">OWASP's session management guidance</a>.
+        require JWTs. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html" target="_blank" rel="noopener noreferrer">OWASP's session management guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>A session token is a bearer credential: generate it securely and validate its server-side state.</li>
@@ -385,7 +385,7 @@ execute the fixed filter through the database driver</code></pre>
         None can be necessary for legitimate cross-site integrations; it needs appropriate CSRF
         defenses, and browsers may still restrict third-party cookies. Lax does not enable cross-site
         fetch requests merely because frontend and backend are on different sites. Set attributes
-        explicitly rather than relying on browser defaults. See <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie">MDN's Set-Cookie reference</a>.
+        explicitly rather than relying on browser defaults. See <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie" target="_blank" rel="noopener noreferrer">MDN's Set-Cookie reference <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Use Secure and HttpOnly for browser session cookies, with deliberate scope and SameSite settings.</li>
@@ -398,7 +398,7 @@ execute the fixed filter through the database driver</code></pre>
         A common signed JWT has three base64url-encoded components separated by dots: a header,
         a claims payload and a signature or MAC. Other JWT representations exist, including encrypted
         tokens. A normal signed JWT is <strong>not encrypted</strong>; its payload is readable by anyone
-        holding the token. Store only claims the recipient needs. See the <a href="https://www.rfc-editor.org/rfc/rfc7519.html">JWT specification</a>.
+        holding the token. Store only claims the recipient needs. See the <a href="https://www.rfc-editor.org/rfc/rfc7519.html" target="_blank" rel="noopener noreferrer">JWT specification <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="table-wrap"><table class="table">
         <thead><tr><th>Claim</th><th>Meaning and validation concern</th></tr></thead>
@@ -415,7 +415,7 @@ execute the fixed filter through the database driver</code></pre>
         trusted key, then enforce the required claims, token purpose and lifetime. Do not let an
         untrusted token choose an arbitrary algorithm or key source. Symmetric algorithms use a shared
         secret; asymmetric algorithms use a private signing key and public verification key. Follow
-        <a href="https://www.rfc-editor.org/rfc/rfc8725">JWT best current practices</a> through a maintained library.
+        <a href="https://www.rfc-editor.org/rfc/rfc8725" target="_blank" rel="noopener noreferrer">JWT best current practices <span role="img" aria-label="opens in a new tab">↗</span></a> through a maintained library.
       </p>
       <p>
         A valid signature establishes integrity and authenticity under that key; it does not prove
@@ -442,7 +442,7 @@ execute the fixed filter through the database driver</code></pre>
         storage, keep revocable server-side grant state, and use a supported replay-defense design.
         Rotation invalidates the old refresh token and retains its relationship to the replacement so
         reuse can trigger revocation. OAuth's security guidance requires rotation or sender constraint
-        for public-client refresh tokens. See <a href="https://www.rfc-editor.org/rfc/rfc9700">RFC 9700</a>.
+        for public-client refresh tokens. See <a href="https://www.rfc-editor.org/rfc/rfc9700" target="_blank" rel="noopener noreferrer">RFC 9700 <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="table-wrap"><table class="table">
         <thead><tr><th>Browser storage</th><th>Main tradeoff</th></tr></thead>
@@ -484,7 +484,7 @@ execute the fixed filter through the database driver</code></pre>
         Set thresholds from expected traffic and risk rather than copying “five failures means a
         24-hour lock.” Use bounded delays, appropriate challenges, alerts and recovery flows that do
         not disclose account existence. Where available, phishing-resistant authentication such as
-        passkeys can reduce reliance on reusable passwords. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html#protect-against-automated-attacks">OWASP's automated-attack guidance</a>.
+        passkeys can reduce reliance on reusable passwords. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html#protect-against-automated-attacks" target="_blank" rel="noopener noreferrer">OWASP's automated-attack guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Distributed instances need coordinated counters where limits are meant to be shared.
@@ -509,7 +509,7 @@ execute the fixed filter through the database driver</code></pre>
         <strong>Broken object-level authorization (BOLA)</strong> occurs when an application fails to
         enforce those resource permissions. Insecure direct object reference, or <strong>IDOR</strong>,
         describes a closely related access-control failure involving user-controlled references.
-        Numeric IDs, UUIDs and strings all need authorization. See <a href="https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/">OWASP's BOLA explanation</a>.
+        Numeric IDs, UUIDs and strings all need authorization. See <a href="https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/" target="_blank" rel="noopener noreferrer">OWASP's BOLA explanation <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="msg">
         <div class="msg-head">Example policy: an owner may read their own invoice within an authorized tenant</div>
@@ -553,7 +553,7 @@ $3 = authenticated user ID from trusted server context</code></pre>
         <strong>Broken function-level authorization (BFLA)</strong> lets someone invoke an operation
         their identity should not be allowed to use. An admin page hidden from ordinary navigation
         still needs an enforced admin policy on its APIs. A user can discover or guess a URL and call
-        it directly. See <a href="https://owasp.org/API-Security/editions/2023/en/0xa5-broken-function-level-authorization/">OWASP's BFLA guidance</a>.
+        it directly. See <a href="https://owasp.org/API-Security/editions/2023/en/0xa5-broken-function-level-authorization/" target="_blank" rel="noopener noreferrer">OWASP's BFLA guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="table-wrap"><table class="table">
         <thead><tr><th>Access-control failure</th><th>Example</th><th>Required boundary</th></tr></thead>
@@ -574,7 +574,7 @@ $3 = authenticated user ID from trusted server context</code></pre>
         allows it. Centralize the rules so they are reviewable, while enforcing them wherever access
         occurs, including alternate endpoints and background actions. A policy error must not silently
         become an allow decision. Changes to authorization require tests for both permitted and denied
-        cases. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html">OWASP's authorization recommendations</a>.
+        cases. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html" target="_blank" rel="noopener noreferrer">OWASP's authorization recommendations <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Hidden URLs and buttons do not protect privileged functions.</li>
@@ -608,7 +608,7 @@ $3 = authenticated user ID from trusted server context</code></pre>
         contexts are among the other ways content can become active. Script elements inserted through
         some APIs may be inert, but that does not make arbitrary <code>innerHTML</code> safe.
         Understand the actual browser sink and use the corresponding defense. See
-        <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html">OWASP's XSS prevention guidance</a>.
+        <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html" target="_blank" rel="noopener noreferrer">OWASP's XSS prevention guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>XSS executes attacker-controlled code with the application's browser privileges.</li>
@@ -631,7 +631,7 @@ $3 = authenticated user ID from trusted server context</code></pre>
         tag, attribute and URL policy. For Markdown, review raw HTML support and plugins, and sanitize
         the final generated HTML before an unsafe rendering sink. Do not modify sanitized output in ways
         that restore dangerous markup. React's <code>dangerouslySetInnerHTML</code> bypasses normal text
-        escaping; it does not sanitize the supplied HTML. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html#html-sanitization">OWASP's sanitization guidance</a>.
+        escaping; it does not sanitize the supplied HTML. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html#html-sanitization" target="_blank" rel="noopener noreferrer">OWASP's sanitization guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Sanitizing content at ingestion may be useful, but does not permanently make that stored value
@@ -644,7 +644,7 @@ $3 = authenticated user ID from trusted server context</code></pre>
         policies need unpredictable nonces generated for each response and applied only to trusted
         scripts; hash-based policies allow specified script contents. Avoid weakening the policy with
         broad allowances just to silence violations. Report-only rollout helps find compatibility
-        issues but does not block anything. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html">OWASP's CSP guidance</a>.
+        issues but does not block anything. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html" target="_blank" rel="noopener noreferrer">OWASP's CSP guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Use escaped text for plain content and a maintained sanitizer when rich HTML is required.</li>
@@ -677,7 +677,7 @@ $3 = authenticated user ID from trusted server context</code></pre>
         CSRF tokens must be validated by the server, not merely included in forms. A design using
         authorization headers that the browser does not automatically attach changes the CSRF threat,
         but cookie-based refresh or login endpoints still need consideration. XSS can often defeat
-        CSRF controls by executing within the trusted application. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html">OWASP's CSRF prevention guidance</a>.
+        CSRF controls by executing within the trusted application. See <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html" target="_blank" rel="noopener noreferrer">OWASP's CSRF prevention guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>CSRF exploits automatically attached credentials; the attacker may never need the response.</li>
@@ -701,7 +701,7 @@ $3 = authenticated user ID from trusted server context</code></pre>
         Use an explicit allowlist of trusted origins for credentialed access. Do not blindly reflect
         any supplied Origin or assume a wildcard supports credentialed response access. Direct HTTP
         clients do not enforce browser CORS rules. Continue to authenticate, authorize and defend
-        state-changing actions on the server. See <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS">MDN's CORS guide</a>.
+        state-changing actions on the server. See <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS" target="_blank" rel="noopener noreferrer">MDN's CORS guide <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>CORS controls browser access to responses; it does not authenticate callers.</li>
@@ -746,7 +746,7 @@ $3 = authenticated user ID from trusted server context</code></pre>
         grant the outer page unrestricted access to a cross-origin frame's contents. Use the appropriate
         framing policy rather than relying on hidden URLs. Security middleware can provide useful
         defaults, but configure them for the application and verify actual responses through proxies.
-        See <a href="https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html">OWASP's HTTP header guidance</a>.
+        See <a href="https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html" target="_blank" rel="noopener noreferrer">OWASP's HTTP header guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Protect secrets throughout their lifecycle and rotate exposed credentials.</li>
@@ -786,9 +786,9 @@ $3 = authenticated user ID from trusted server context</code></pre>
         and use actionable alerts with an incident-response path.
       </p>
       <p>
-        Continue with the <a href="https://portswigger.net/web-security">PortSwigger Web Security Academy</a>
-        for guided labs, the <a href="https://owasp.org/www-project-top-ten/">OWASP Top 10</a> for broad
-        risk categories, and the <a href="https://cheatsheetseries.owasp.org/">OWASP Cheat Sheet Series</a>
+        Continue with the <a href="https://portswigger.net/web-security" target="_blank" rel="noopener noreferrer">PortSwigger Web Security Academy <span role="img" aria-label="opens in a new tab">↗</span></a>
+        for guided labs, the <a href="https://owasp.org/www-project-top-ten/" target="_blank" rel="noopener noreferrer">OWASP Top 10 <span role="img" aria-label="opens in a new tab">↗</span></a> for broad
+        risk categories, and the <a href="https://cheatsheetseries.owasp.org/" target="_blank" rel="noopener noreferrer">OWASP Cheat Sheet Series <span role="img" aria-label="opens in a new tab">↗</span></a>
         for implementation guidance. Explore additional boundaries such as SSRF, file uploads, path
         traversal and dependency security as they become relevant to your application. Practice in
         dedicated labs or systems you are authorized to test.

@@ -136,6 +136,22 @@
       blurb: 'Protect trust boundaries with safe queries, secure credentials and consistent access checks.',
       outcomes: ['Recognize injection risks and separate untrusted data from executable structure.', 'Protect passwords, sessions and tokens while enforcing object, tenant and function permissions.', 'Distinguish XSS, CSRF and CORS defenses, and verify security through configuration, tests and audit evidence.'],
       tags: ['security', 'trust boundaries', 'defense in depth', 'SQL injection', 'parameterized queries', 'prepared statements', 'NoSQL injection', 'MongoDB', 'mass assignment', 'command injection', 'argument injection', 'authentication', 'authorization', 'OAuth', 'OpenID Connect', 'account linking', 'password hashing', 'salt', 'rainbow tables', 'Argon2id', 'bcrypt', 'scrypt', 'PBKDF2', 'work factor', 'sessions', 'entropy', 'CSPRNG', 'session fixation', 'cookies', 'HttpOnly', 'Secure', 'SameSite', 'JWT', 'claims', 'signature', 'revocation', 'refresh tokens', 'rotation', 'localStorage', 'rate limiting', 'credential stuffing', 'password spraying', 'MFA', 'passkeys', 'BOLA', 'IDOR', 'BFLA', 'tenant isolation', 'RBAC', 'default deny', 'UUID', 'XSS', 'sanitization', 'Markdown', 'CSP', 'CSRF', 'CORS', 'origin', 'secrets', 'security headers', 'HSTS', 'clickjacking', 'audit logs', 'OWASP', 'PortSwigger']
+    },
+    {
+      num: '17',
+      slug: '17-scaling-performance',
+      title: 'Scaling & Performance',
+      blurb: 'Measure latency and capacity, find bottlenecks and choose scaling changes from workload evidence.',
+      outcomes: ['Interpret latency distributions, throughput, concurrency, queueing and resource headroom.', 'Locate bottlenecks and evaluate query, index, connection-pool and cache improvements.', 'Compare vertical and horizontal scaling and validate capacity under realistic load and failures.'],
+      tags: ['scaling', 'performance', 'latency', 'percentiles', 'P50', 'P90', 'P95', 'P99', 'P99.9', 'tail latency', 'histograms', 'throughput', 'RPS', 'concurrency', 'offered load', 'capacity', 'utilization', 'saturation', 'queueing', 'headroom', 'bursts', 'backpressure', 'bottlenecks', 'profiling', 'CPU', 'I/O', 'flame graphs', 'distributed tracing', 'critical path', 'N+1', 'eager loading', 'joins', 'indexes', 'B-tree', 'composite index', 'covering index', 'index-only scan', 'skip scan', 'EXPLAIN ANALYZE', 'connection pooling', 'PgBouncer', 'connection budget', 'caching', 'hit rate', 'TTL', 'invalidation', 'local cache', 'distributed cache', 'tiered cache', 'cache-aside', 'write-through', 'write-behind', 'Redis', 'Valkey', 'Memcached', 'vertical scaling', 'horizontal scaling', 'autoscaling', 'load balancing', 'shared state', 'multi-region', 'load testing', 'benchmarking']
+    },
+    {
+      num: '18',
+      slug: '18-distributed-scaling',
+      title: 'Scaling & Performance II',
+      blurb: 'Plan shared state, traffic routing, database growth and execution models for distributed backends.',
+      outcomes: ['Design shared state, load-balancing policies, health checks and safe instance replacement.', 'Evaluate replicas, shard keys, CDN policies and edge execution with explicit consistency and security requirements.', 'Choose durable asynchronous workflows, service boundaries and serverless models from measured needs and operational limits.'],
+      tags: ['scaling', 'performance', 'part two', 'distributed systems', 'statelessness', 'shared state', 'sessions', 'object storage', 'load balancer', 'reverse proxy', 'round robin', 'weighted round robin', 'least connections', 'least requests', 'health checks', 'readiness', 'liveness', 'draining', 'read replicas', 'primary', 'replication lag', 'read after write', 'remote_apply', 'consistency', 'partitioning', 'partition pruning', 'sharding', 'shard key', 'hot keys', 'resharding', 'managed databases', 'Neon', 'Vitess', 'CockroachDB', 'backups', 'CDN', 'PoP', 'edge caching', 'Cache-Control', 'purging', 'DDoS', 'edge computing', 'Cloudflare Workers', 'TCP', 'virtual filesystem', 'asynchronous processing', 'outbox', 'durable handoff', 'account deletion', '202 Accepted', 'microservices', 'modular monolith', 'saga', 'autoscaling', 'predictive scaling', 'serverless', 'Lambda', 'cold starts', 'Firecracker', 'V8 isolates', 'provisioned concurrency', 'quotas', 'database connections', 'cost']
     }
   ];
 

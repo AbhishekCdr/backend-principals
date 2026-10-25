@@ -86,7 +86,7 @@
         pillars of observability. They complement one another, but collecting all three does not
         automatically make a system understandable. Good instrumentation, context and questions matter
         more than checking off a list of products. Other evidence, such as profiles and deployment
-        history, can also be useful. See the <a href="https://opentelemetry.io/docs/concepts/observability-primer/">OpenTelemetry observability primer</a>.
+        history, can also be useful. See the <a href="https://opentelemetry.io/docs/concepts/observability-primer/" target="_blank" rel="noopener noreferrer">OpenTelemetry observability primer <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Monitoring can help diagnose problems as well as detect them, and observability does not
@@ -243,7 +243,7 @@ logger.Info("server.started", "port", 8080)</code></pre>
       <p>
         A TextHandler can present text output, and LevelDebug allows more diagnostic events. Neither
         automatically adds a trace ID: supply correlation fields through your logging integration.
-        See the <a href="https://pkg.go.dev/log/slog">slog documentation</a> for handler and level behavior.
+        See the <a href="https://pkg.go.dev/log/slog" target="_blank" rel="noopener noreferrer">slog documentation <span role="img" aria-label="opens in a new tab">↗</span></a> for handler and level behavior.
         Plain text can also be collected and parsed, but a deliberate field schema reduces brittle extraction.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
@@ -268,7 +268,7 @@ logger.Info("server.started", "port", 8080)</code></pre>
       </table></div>
       <p>
         These are common choices; metric systems also offer other instruments, such as summaries.
-        See <a href="https://prometheus.io/docs/concepts/metric_types/">Prometheus metric types</a>.
+        See <a href="https://prometheus.io/docs/concepts/metric_types/" target="_blank" rel="noopener noreferrer">Prometheus metric types <span role="img" aria-label="opens in a new tab">↗</span></a>.
         A count of completed operations is not the same as the number of operations currently active.
       </p>
       <h3>Define success and failure correctly</h3>
@@ -290,7 +290,7 @@ Example: 20 / 1,000 = 0.02 = 2%</code></pre>
         A latency average can hide slow users, so also inspect percentiles such as p95 or p99.
         Aggregate compatible distributions before calculating a fleet percentile; averaging individual
         instances' p95 values does not give the fleet p95.
-        See <a href="https://prometheus.io/docs/practices/histograms/">histograms and summaries</a>.
+        See <a href="https://prometheus.io/docs/practices/histograms/" target="_blank" rel="noopener noreferrer">histograms and summaries <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Use counters for accumulated events, gauges for current state and distributions for latency.</li>
@@ -318,7 +318,7 @@ Example: 20 / 1,000 = 0.02 = 2%</code></pre>
         rather than in ordinary metric dimensions. Even bounded dimensions multiply when combined,
         so assess the total across instances and histogram buckets. Treat unmatched routes as a
         bounded category instead of giving each unknown path a new label.
-        See <a href="https://prometheus.io/docs/practices/instrumentation/#do-not-overuse-labels">Prometheus guidance on label cardinality</a>.
+        See <a href="https://prometheus.io/docs/practices/instrumentation/#do-not-overuse-labels" target="_blank" rel="noopener noreferrer">Prometheus guidance on label cardinality <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Each distinct metric label set costs another time series.</li>
@@ -346,7 +346,7 @@ Example: 20 / 1,000 = 0.02 = 2%</code></pre>
         so adding every span's duration does not give elapsed request time. Trace viewers commonly
         display a waterfall to make nesting and overlap visible. Only instrumented and collected
         operations appear; the trace is not a recording of every executed line of code.
-        See <a href="https://opentelemetry.io/docs/concepts/signals/traces/">OpenTelemetry traces</a>.
+        See <a href="https://opentelemetry.io/docs/concepts/signals/traces/" target="_blank" rel="noopener noreferrer">OpenTelemetry traces <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="callout callout--key">
         <p class="callout-label">A trace is not an atomic transaction</p>
@@ -379,7 +379,7 @@ Example: 20 / 1,000 = 0.02 = 2%</code></pre>
         <code>traceparent</code>. In Go, request context is passed through <code>context.Context</code>;
         other languages use their own context facilities. Use established instrumentation rather
         than generating unrelated trace IDs at every layer.
-        See <a href="https://opentelemetry.io/docs/concepts/context-propagation/">OpenTelemetry context propagation</a>.
+        See <a href="https://opentelemetry.io/docs/concepts/context-propagation/" target="_blank" rel="noopener noreferrer">OpenTelemetry context propagation <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         A request ID used in support reports and a distributed trace ID are different identifiers,
@@ -422,13 +422,13 @@ Example: 20 / 1,000 = 0.02 = 2%</code></pre>
         A Collector can batch, filter or redact data and route it to multiple destinations. It is
         optional in some architectures, and collecting data does not make the application independent
         of transport failures. Configure queue limits, retries and shutdown flushing deliberately.
-        See <a href="https://opentelemetry.io/docs/collector/">the OpenTelemetry Collector overview</a>.
+        See <a href="https://opentelemetry.io/docs/collector/" target="_blank" rel="noopener noreferrer">the OpenTelemetry Collector overview <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Initialize supported instrumentation before the work it should observe. Avoid adding two
         independent root-request instruments that duplicate spans or metrics. A proprietary agent
         and OpenTelemetry may coexist through supported integrations, but their ownership and export
-        paths must be clear. The <a href="https://opentelemetry.io/docs/languages/go/instrumentation/">Go instrumentation guide</a>
+        paths must be clear. The <a href="https://opentelemetry.io/docs/languages/go/instrumentation/" target="_blank" rel="noopener noreferrer">Go instrumentation guide <span role="img" aria-label="opens in a new tab">↗</span></a>
         shows the actual APIs behind these concepts.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
@@ -496,13 +496,13 @@ always:
       <div class="table-wrap"><table class="table">
         <thead><tr><th>Component</th><th>Typical role</th></tr></thead>
         <tbody>
-          <tr><td><a href="https://prometheus.io/docs/concepts/metric_types/">Prometheus</a></td><td>Collect, store and query time-series metrics; applications and exporters provide the measurements.</td></tr>
-          <tr><td><a href="https://grafana.com/docs/grafana/latest/fundamentals/">Grafana</a></td><td>Query connected data sources, explore signals, build dashboards and configure alerting.</td></tr>
-          <tr><td><a href="https://grafana.com/docs/loki/latest/get-started/overview/">Loki</a></td><td>Store and query logs delivered by supported clients or collectors.</td></tr>
-          <tr><td><a href="https://www.jaegertracing.io/docs/latest/">Jaeger</a></td><td>Collect, store and explore distributed traces.</td></tr>
-          <tr><td>OpenTelemetry Collector or <a href="https://grafana.com/docs/alloy/latest/">Grafana Alloy</a></td><td>Receive and process telemetry, then forward it through configured pipelines.</td></tr>
+          <tr><td><a href="https://prometheus.io/docs/concepts/metric_types/" target="_blank" rel="noopener noreferrer">Prometheus <span role="img" aria-label="opens in a new tab">↗</span></a></td><td>Collect, store and query time-series metrics; applications and exporters provide the measurements.</td></tr>
+          <tr><td><a href="https://grafana.com/docs/grafana/latest/fundamentals/" target="_blank" rel="noopener noreferrer">Grafana <span role="img" aria-label="opens in a new tab">↗</span></a></td><td>Query connected data sources, explore signals, build dashboards and configure alerting.</td></tr>
+          <tr><td><a href="https://grafana.com/docs/loki/latest/get-started/overview/" target="_blank" rel="noopener noreferrer">Loki <span role="img" aria-label="opens in a new tab">↗</span></a></td><td>Store and query logs delivered by supported clients or collectors.</td></tr>
+          <tr><td><a href="https://www.jaegertracing.io/docs/latest/" target="_blank" rel="noopener noreferrer">Jaeger <span role="img" aria-label="opens in a new tab">↗</span></a></td><td>Collect, store and explore distributed traces.</td></tr>
+          <tr><td>OpenTelemetry Collector or <a href="https://grafana.com/docs/alloy/latest/" target="_blank" rel="noopener noreferrer">Grafana Alloy <span role="img" aria-label="opens in a new tab">↗</span></a></td><td>Receive and process telemetry, then forward it through configured pipelines.</td></tr>
           <tr><td>Elasticsearch, Logstash and Kibana</td><td>A common combination for ingestion, indexed search and log exploration.</td></tr>
-          <tr><td><a href="https://docs.newrelic.com/docs/distributed-tracing/concepts/introduction-distributed-tracing/">New Relic</a> or <a href="https://docs.datadoghq.com/tracing/">Datadog</a></td><td>Integrated platforms for application monitoring, tracing and related telemetry investigation.</td></tr>
+          <tr><td><a href="https://docs.newrelic.com/docs/distributed-tracing/concepts/introduction-distributed-tracing/" target="_blank" rel="noopener noreferrer">New Relic <span role="img" aria-label="opens in a new tab">↗</span></a> or <a href="https://docs.datadoghq.com/tracing/" target="_blank" rel="noopener noreferrer">Datadog <span role="img" aria-label="opens in a new tab">↗</span></a></td><td>Integrated platforms for application monitoring, tracing and related telemetry investigation.</td></tr>
         </tbody>
       </table></div>
       <div class="callout callout--note">
@@ -510,7 +510,7 @@ always:
         <p>
           Promtail reached end of life on March 2, 2026. For new setups or migrations, use Grafana
           Alloy or another supported collection client rather than treating Promtail as a current
-          default. See <a href="https://grafana.com/docs/loki/latest/send-data/promtail/">Grafana's Promtail notice</a>.
+          default. See <a href="https://grafana.com/docs/loki/latest/send-data/promtail/" target="_blank" rel="noopener noreferrer">Grafana's Promtail notice <span role="img" aria-label="opens in a new tab">↗</span></a>.
         </p>
       </div>
       <p>
@@ -547,8 +547,8 @@ always:
       <p>
         A service-level indicator (SLI) measures a defined outcome, such as the fraction of eligible
         requests completed successfully. A service-level objective (SLO) specifies the target over
-        a period. See <a href="https://sre.google/sre-book/service-level-objectives/">the SRE guide to service-level objectives</a>. Alerts can use these objectives to focus attention on user impact instead of
-        paging whenever a resource briefly changes. See <a href="https://sre.google/sre-book/monitoring-distributed-systems/">Google SRE's monitoring guidance</a>.
+        a period. See <a href="https://sre.google/sre-book/service-level-objectives/" target="_blank" rel="noopener noreferrer">the SRE guide to service-level objectives <span role="img" aria-label="opens in a new tab">↗</span></a>. Alerts can use these objectives to focus attention on user impact instead of
+        paging whenever a resource briefly changes. See <a href="https://sre.google/sre-book/monitoring-distributed-systems/" target="_blank" rel="noopener noreferrer">Google SRE's monitoring guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <h3>Freshness and absence are part of the dashboard</h3>
       <p>
@@ -604,13 +604,13 @@ always:
         outcome is known. <strong>Tail sampling</strong> makes decisions after observing enough of
         the trace to consider properties such as errors or duration. Tail sampling needs buffering
         and suitable routing of related spans, and cannot recover spans already discarded upstream.
-        See <a href="https://opentelemetry.io/docs/concepts/sampling/">OpenTelemetry sampling</a>.
+        See <a href="https://opentelemetry.io/docs/concepts/sampling/" target="_blank" rel="noopener noreferrer">OpenTelemetry sampling <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Sampled traces are examples, not automatically a complete request census. Prefer appropriate
         aggregate instrumentation for traffic and error counts. If metrics are derived from spans,
         understand where sampling occurs and how it affects those metrics. Different SDK and backend
-        pipelines can behave differently, as illustrated by <a href="https://docs.datadoghq.com/tracing/metrics/metrics_namespace/">Datadog's trace-metric documentation</a>.
+        pipelines can behave differently, as illustrated by <a href="https://docs.datadoghq.com/tracing/metrics/metrics_namespace/" target="_blank" rel="noopener noreferrer">Datadog's trace-metric documentation <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         Bound queues and export work so a telemetry outage does not exhaust application memory or

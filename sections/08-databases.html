@@ -94,7 +94,7 @@
         well as persistent storage. Redis keeps its working data in memory and can also persist it
         using snapshots or an append-only file. Choose guarantees deliberately rather than assuming
         “cache means no persistence” or “database means every read touches disk.”
-        <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/">Redis persistence options</a>.
+        <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/" target="_blank" rel="noopener noreferrer">Redis persistence options <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Persistence keeps data beyond the lifetime of the process that created it.</li>
@@ -155,7 +155,7 @@
         These are examples, not exclusive assignments. MongoDB supports schema validation, indexes
         and transactions; flexible schemas still need design. PostgreSQL can store structured columns
         alongside JSON documents. Neither database category guarantees accurate application data
-        without the right rules. <a href="https://www.mongodb.com/docs/manual/core/schema-validation/">MongoDB schema validation</a>.
+        without the right rules. <a href="https://www.mongodb.com/docs/manual/core/schema-validation/" target="_blank" rel="noopener noreferrer">MongoDB schema validation <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <h3>Why this lesson uses PostgreSQL</h3>
       <p>
@@ -195,7 +195,7 @@
         is rounded and an out-of-range result fails. Binary floats cannot exactly represent many
         decimal fractions. Use exact decimal values, or a deliberately scaled integer model, for
         amounts requiring exact decimal arithmetic, and define rounding rules.
-        <a href="https://www.postgresql.org/docs/current/datatype-numeric.html">PostgreSQL numeric types</a>.
+        <a href="https://www.postgresql.org/docs/current/datatype-numeric.html" target="_blank" rel="noopener noreferrer">PostgreSQL numeric types <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         For new sequential keys, identity columns make generation explicit, for example
@@ -218,7 +218,7 @@
         length constraint when the domain needs one, either through varchar or a CHECK on text.
         Keep important invariants in the database as well as validating requests. Character values
         have an implementation limit of about 1 GB, not unlimited storage.
-        <a href="https://www.postgresql.org/docs/current/datatype-character.html">PostgreSQL character types</a>.
+        <a href="https://www.postgresql.org/docs/current/datatype-character.html" target="_blank" rel="noopener noreferrer">PostgreSQL character types <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Integer capacity increases from smallint to integer to bigint.</li>
@@ -248,8 +248,8 @@
         <p>It identifies an instant, not the original IANA zone name or input offset. Store a separate
           zone such as Asia/Kolkata when that information is part of the domain. Also,
           <code>CURRENT_TIMESTAMP</code> is the transaction start time; <code>statement_timestamp()</code>
-          is the statement start time. <a href="https://www.postgresql.org/docs/current/datatype-datetime.html">Date/time types</a>
-          and <a href="https://www.postgresql.org/docs/current/functions-datetime.html#FUNCTIONS-DATETIME-CURRENT">current-time functions</a>.</p>
+          is the statement start time. <a href="https://www.postgresql.org/docs/current/datatype-datetime.html" target="_blank" rel="noopener noreferrer">Date/time types <span role="img" aria-label="opens in a new tab">↗</span></a>
+          and <a href="https://www.postgresql.org/docs/current/functions-datetime.html#FUNCTIONS-DATETIME-CURRENT" target="_blank" rel="noopener noreferrer">current-time functions <span role="img" aria-label="opens in a new tab">↗</span></a>.</p>
       </div>
       <p>
         A UUID is not an authorization mechanism. A caller who knows an ID still needs permission
@@ -261,7 +261,7 @@
         for a representation that supports efficient processing and indexing. jsonb does not retain
         whitespace, key order or duplicate object keys. Prefer it for many queryable document fields,
         but still define and validate their shape. Frequently joined or constrained attributes often
-        belong in ordinary columns. <a href="https://www.postgresql.org/docs/current/datatype-json.html">PostgreSQL JSON types</a>.
+        belong in ordinary columns. <a href="https://www.postgresql.org/docs/current/datatype-json.html" target="_blank" rel="noopener noreferrer">PostgreSQL JSON types <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="keytakeaways"><h4>Key takeaways</h4><ul>
         <li>Use date for dates and timestamptz for instants; save a separate time-zone identifier when needed.</li>
@@ -292,7 +292,7 @@
         <code>dbmate up</code> applies pending migrations. A <code>DATABASE_URL</code> configures the
         target database. Keep credentials out of version control and verify the target before running
         changes. dbmate uses <code>schema_migrations</code> to record applied versions, not merely a
-        guess based on the newest filename. <a href="https://github.com/amacneil/dbmate">dbmate documentation</a>.
+        guess based on the newest filename. <a href="https://github.com/amacneil/dbmate" target="_blank" rel="noopener noreferrer">dbmate documentation <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <h3>Up and down have limits</h3>
       <p>
@@ -329,7 +329,7 @@
         A default supplies an omitted value; it does not itself forbid an explicit NULL. Choose
         nullability from the domain, not a target percentage of columns. Boundary validation gives
         clients useful errors, while database constraints protect every writer, including scripts
-        and concurrent requests. <a href="https://www.postgresql.org/docs/current/ddl-constraints.html">PostgreSQL constraints</a>.
+        and concurrent requests. <a href="https://www.postgresql.org/docs/current/ddl-constraints.html" target="_blank" rel="noopener noreferrer">PostgreSQL constraints <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="msg">
         <div class="msg-head"><span class="dot"></span>Schema migration — up, part 1: allowed states</div>
@@ -636,7 +636,7 @@ WHERE u.id = $1::uuid;</code></pre>
         characters around the value yourself or wrap <code>$1</code> in SQL string quotes. A value
         containing SQL-looking text remains data; an invalid UUID fails type conversion. A valid
         UUID still requires a permission check. Parameterization prevents injection, not unauthorized access.
-        <a href="https://www.postgresql.org/docs/current/sql-prepare.html">PostgreSQL prepared statements and parameters</a>.
+        <a href="https://www.postgresql.org/docs/current/sql-prepare.html" target="_blank" rel="noopener noreferrer">PostgreSQL prepared statements and parameters <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="callout callout--warn">
         <div class="callout-label">Column names and ASC/DESC are not value parameters</div>
@@ -816,8 +816,8 @@ CREATE INDEX project_members_user_id_idx
         descending indexes for a single column. Mixed directions and leading columns matter for
         multi-column ordering. ILIKE search may need an expression index or a specialized operator
         class; an ordinary text B-tree does not automatically optimize every pattern.
-        <a href="https://www.postgresql.org/docs/current/indexes-ordering.html">Indexes and ordering</a>,
-        <a href="https://www.postgresql.org/docs/current/indexes-multicolumn.html">multicolumn indexes</a>.
+        <a href="https://www.postgresql.org/docs/current/indexes-ordering.html" target="_blank" rel="noopener noreferrer">Indexes and ordering <span role="img" aria-label="opens in a new tab">↗</span></a>,
+        <a href="https://www.postgresql.org/docs/current/indexes-multicolumn.html" target="_blank" rel="noopener noreferrer">multicolumn indexes <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <h3>Measure with a query plan</h3>
       <div class="msg">
@@ -832,7 +832,7 @@ LIMIT 20;</code></pre>
         Compare estimates, actual rows, scans, sorting and buffer activity using representative data.
         EXPLAIN ANALYZE executes the statement, so use care with writes or expensive queries. A tiny
         seed table using a sequential scan does not prove the index is broken.
-        <a href="https://www.postgresql.org/docs/current/using-explain.html">PostgreSQL EXPLAIN guide</a>.
+        <a href="https://www.postgresql.org/docs/current/using-explain.html" target="_blank" rel="noopener noreferrer">PostgreSQL EXPLAIN guide <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <div class="msg">
         <div class="msg-head"><span class="dot"></span>Reverse the example index migration</div>
@@ -898,7 +898,7 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();</code></pre>
         NEW is the proposed row value. The BEFORE UPDATE trigger changes its timestamp before the
         row is stored, and RETURN NEW passes that row onward. BEGIN/END delimit the function body;
         they do not start a separate SQL transaction. The trigger runs in the updating statement's
-        transaction. <a href="https://www.postgresql.org/docs/current/plpgsql-trigger.html">PostgreSQL trigger functions</a>.
+        transaction. <a href="https://www.postgresql.org/docs/current/plpgsql-trigger.html" target="_blank" rel="noopener noreferrer">PostgreSQL trigger functions <span role="img" aria-label="opens in a new tab">↗</span></a>.
       </p>
       <p>
         This policy uses statement start time, so all rows updated by one statement get the same
