@@ -176,6 +176,20 @@ summary { cursor: pointer; }
 .compare-col--pro h4 { color: var(--accent); }
 .compare-col--con h4 { color: var(--danger); }
 
+/* Concept diagrams retain readable labels on narrow screens. */
+.concept-diagram { margin: 28px 0; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); overflow: hidden; break-inside: avoid; }
+.diagram-scroll { overflow-x: auto; }
+.diagram-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.concept-diagram svg { display: block; width: 100%; min-width: 640px; height: auto; font: 15px var(--font-sans); }
+.concept-diagram text { fill: var(--text); }
+.concept-diagram .center { text-anchor: middle; }
+.concept-diagram rect { fill: var(--surface-2); stroke: var(--border); }
+.concept-diagram rect.active { fill: var(--accent-soft); stroke: var(--accent); }
+.concept-diagram rect.waiting { stroke: var(--text-dim); stroke-dasharray: 5 4; }
+.concept-diagram .connector { fill: none; stroke: var(--text-dim); stroke-width: 1.5; }
+.concept-diagram .arrowhead { fill: var(--text-dim); }
+.concept-diagram figcaption { padding: 14px 18px; border-top: 1px solid var(--border-soft); color: var(--text-dim); font-size: 14px; }
+
 /* Request examples */
 .msg { margin: 24px 0; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); overflow: hidden; }
 .msg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); color: var(--text-dim); font-size: 14px; }
@@ -366,6 +380,8 @@ table.table .nowrap { white-space: nowrap; }
   .prose h2, .prose h3 { break-after: avoid; }
   .keytakeaways, .callout, .card, .lesson-entry { break-inside: avoid; }
   .table-wrap { overflow: visible; }
+  .diagram-scroll { overflow: visible; }
+  .concept-diagram svg { min-width: 0; }
   table.table { min-width: 0; font-size: 10pt; }
   table.table .nowrap { white-space: normal; }
   .msg pre, .msg pre code, .codeblock { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 9pt; }

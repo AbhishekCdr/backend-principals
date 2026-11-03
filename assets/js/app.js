@@ -152,6 +152,14 @@
       blurb: 'Plan shared state, traffic routing, database growth and execution models for distributed backends.',
       outcomes: ['Design shared state, load-balancing policies, health checks and safe instance replacement.', 'Evaluate replicas, shard keys, CDN policies and edge execution with explicit consistency and security requirements.', 'Choose durable asynchronous workflows, service boundaries and serverless models from measured needs and operational limits.'],
       tags: ['scaling', 'performance', 'part two', 'distributed systems', 'statelessness', 'shared state', 'sessions', 'object storage', 'load balancer', 'reverse proxy', 'round robin', 'weighted round robin', 'least connections', 'least requests', 'health checks', 'readiness', 'liveness', 'draining', 'read replicas', 'primary', 'replication lag', 'read after write', 'remote_apply', 'consistency', 'partitioning', 'partition pruning', 'sharding', 'shard key', 'hot keys', 'resharding', 'managed databases', 'Neon', 'Vitess', 'CockroachDB', 'backups', 'CDN', 'PoP', 'edge caching', 'Cache-Control', 'purging', 'DDoS', 'edge computing', 'Cloudflare Workers', 'TCP', 'virtual filesystem', 'asynchronous processing', 'outbox', 'durable handoff', 'account deletion', '202 Accepted', 'microservices', 'modular monolith', 'saga', 'autoscaling', 'predictive scaling', 'serverless', 'Lambda', 'cold starts', 'Firecracker', 'V8 isolates', 'provisioned concurrency', 'quotas', 'database connections', 'cost']
+    },
+    {
+      num: '19',
+      slug: '19-concurrency-parallelism',
+      title: 'Concurrency & Parallelism',
+      blurb: 'Understand CPU and I/O progress, runtime scheduling and safe coordination of overlapping work.',
+      outcomes: ['Distinguish concurrency, parallelism, CPU execution and I/O waiting in request timelines.', 'Explain native threads, event loops, async/await and Go scheduling without confusing tasks with execution resources.', 'Recognize shared-state and async races, choose appropriate coordination and bound task lifetimes and resource demand.'],
+      tags: ['concurrency', 'parallelism', 'CPU-bound', 'I/O-bound', 'blocking', 'nonblocking', 'processes', 'threads', 'shared memory', 'stack', 'heap', 'registers', 'scheduler', 'preemption', 'runnable', 'context switching', 'thread pool', 'event loop', 'epoll', 'kqueue', 'IOCP', 'libuv', 'Node.js', 'worker_threads', 'async', 'await', 'Promise', 'microtasks', 'callbacks', 'state machine', 'Promise.all', 'asyncio', 'WSGI', 'ASGI', 'Python workers', 'Python GIL', 'Rust futures', 'waker', 'Java virtual threads', 'goroutines', 'Go scheduler', 'GOMAXPROCS', 'GMP', 'net/http', 'race condition', 'data race', 'lost update', 'check then act', 'mutex', 'lock', 'atomic operation', 'transaction isolation', 'channels', 'message passing', 'ownership', 'semaphore', 'backpressure', 'cancellation', 'structured concurrency', 'race detector', 'OSTEP']
     }
   ];
 

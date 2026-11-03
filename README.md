@@ -26,6 +26,7 @@ The site itself has no framework, dependencies or build step.
 | 16 | [Backend Security](sections/16-security.html) | Trust boundaries, SQL/NoSQL/command injection, password hashing, sessions, cookies, JWTs, revocation, rate limiting, BOLA, BFLA, tenant isolation, XSS, CSP, CSRF, CORS, secrets, headers & security testing |
 | 17 | [Scaling & Performance](sections/17-scaling-performance.html) | Latency distributions, percentiles, throughput, queueing, headroom, bottlenecks, profiling, tracing, N+1 queries, indexes, connection pools, PgBouncer, caching tradeoffs, vertical/horizontal scaling & capacity testing |
 | 18 | [Scaling & Performance II](sections/18-distributed-scaling.html) | Stateless instances, shared storage, load-balancing algorithms, health checks, replicas, consistency, partitioning, sharding, managed databases, CDNs, edge computing, durable jobs, microservices, autoscaling & serverless |
+| 19 | [Concurrency & Parallelism](sections/19-concurrency-parallelism.html) | CPU/I/O workloads, request timelines, processes, threads, scheduling, event loops, async/await, Promise coordination, runtime differences, Go goroutines, GOMAXPROCS, races, locks, atomic updates, ownership & task lifetimes |
 
 ## Running it
 
@@ -66,8 +67,8 @@ Opening `index.html` directly from the filesystem also works.
 
    ```js
    {
-     num: '19',
-     slug: '19-your-topic',
+     num: '20',
+     slug: '20-your-topic',
      title: 'Your Next Topic',
      blurb: 'One sentence for the home page card.',
      outcomes: ['First learning goal.', 'Second learning goal.', 'Third learning goal.'],
@@ -126,7 +127,8 @@ navigation, 200% text/zoom and printing.
 │   ├── 15-graceful-shutdown.html
 │   ├── 16-security.html
 │   ├── 17-scaling-performance.html
-│   └── 18-distributed-scaling.html
+│   ├── 18-distributed-scaling.html
+│   └── 19-concurrency-parallelism.html
 ├── tests/revision.test.js          revision behavior and content coverage
 └── assets/
     ├── css/main.css                the whole design system

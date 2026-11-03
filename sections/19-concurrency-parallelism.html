@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concurrency &amp; Parallelism &middot; Backend Principles</title>
+<meta name="description" content="Backend concurrency and parallelism: CPU and I/O waits, processes, threads, event loops, async/await, Go scheduling, GOMAXPROCS, races, locks, atomic operations, ownership and task lifetimes.">
+<script>
+  (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try {
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell">
+
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 19</p>
+      <h1>Concurrency &amp; Parallelism</h1>
+      <p class="lead">
+        Follow a request through CPU execution, I/O waits and scheduling.
+        Understand <strong>which work can overlap, which work can run in parallel and which shared state needs protection</strong>.
+      </p>
+    </header>
+
+    <div class="prose">
+      <h2>What happens while a request waits?</h2>
+      <p>
+        A handler parses a request, sends a database query and waits for its result. While that
+        result is unavailable, this request may have no useful application computation to perform.
+        A concurrent server can let other requests make progress during that interval instead of
+        requiring every request to finish before the next begins.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Illustrative serial request budget, not a universal backend profile</div>
+        <pre><code>Five non-overlapping I/O waits × 50 ms = 250 ms waiting
+Application CPU execution              =  10 ms
+Total elapsed time                    = 260 ms
+
+Waiting fraction = 250 / 260 ≈ 96.2%
+Application CPU fraction = 10 / 260 ≈ 3.8%</code></pre>
+      </div>
+      <p>
+        Those percentages describe one example request's elapsed time. They do not prove that the
+        whole machine is idle or that memory is unused: other processes, the kernel and the database
+        can be working, and the waiting request still retains state and buffers. Real request costs
+        depend on the workload and must be measured.
+      </p>
+      <p>
+        CPU frequency is also not an instruction-throughput guarantee. A 3 GHz clock counts cycles;
+        instructions per cycle vary with hardware and code. The important observation is the
+        opportunity to overlap useful work with waiting, rather than a fixed number of “wasted instructions.”
+      </p>
+      <p>
+        Concurrency can improve resource use and completed throughput, but it does not make a remote
+        dependency answer sooner. Additional work can also create contention. Connect these concepts
+        to <a href="17-scaling-performance.html">latency, throughput and capacity</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Another request can make progress while one request awaits an external result.</li>
+        <li>Waiting can free execution capacity while memory and other resources remain occupied.</li>
+        <li>Measure the actual workload; one request's timing is not the machine's utilization.</li>
+      </ul></div>
+
+      <h2>Concurrency and parallelism describe different things</h2>
+      <p>
+        <strong>Concurrency</strong> means multiple activities have overlapping lifetimes and can
+        make progress without each finishing first. <strong>Parallelism</strong> means some work
+        actually executes simultaneously on available execution resources. A program can be
+        concurrent on one execution lane and can use several lanes for parallel work.
+      </p>
+      <p>
+        In a simplified single-lane timeline, only one request uses that lane at a time, while
+        network operations may progress elsewhere. Suppose A and B arrive together, A needs
+        5 ms of initial CPU work and B needs 10 ms:
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Request</th><th>Initial CPU</th><th>I/O wait</th><th>Final CPU</th><th>Completion</th></tr></thead>
+        <tbody>
+          <tr><td>A</td><td>0–5 ms</td><td>5–45 ms</td><td>45–50 ms</td><td>50 ms</td></tr>
+          <tr><td>B</td><td>5–15 ms</td><td>15–50 ms</td><td>50–55 ms</td><td>55 ms</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        The CPU intervals do not overlap, but both requests are in progress together. With two
+        suitable execution lanes, their initial computation could also overlap. A task whose I/O
+        becomes ready may still wait for scheduling before its next computation runs.
+      </p>
+      <p>
+        This is an application-level model, not a claim that a physical core executes exactly one
+        instruction at a time. Modern CPUs have features such as instruction-level parallelism,
+        vector execution and simultaneous multithreading. For backend design, distinguish overlapping
+        task lifetimes from the execution resources available to run their computation.
+      </p>
+
+      <figure class="concept-diagram">
+        <div class="diagram-scroll" role="region" aria-label="Overlap versus simultaneous execution diagram" tabindex="0">
+          <svg viewBox="0 0 700 395" role="img" aria-labelledby="lanes-title lanes-desc">
+            <title id="lanes-title">Overlap versus simultaneous execution</title>
+            <desc id="lanes-desc">Top: A starts computing, waits for I/O while B computes, then resumes. Bottom: two lanes execute A and B at the same time. Widths are schematic, not a timing scale.</desc>
+            <defs><marker id="lanes-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+            <text x="24" y="30" class="">CONCURRENT · one execution lane</text><text x="24" y="82" class="">CPU</text><rect x="135" y="54" width="110" height="44" rx="8" class="active"/><text x="190.0" y="81" class="center">A: compute</text><rect x="255" y="54" width="110" height="44" rx="8" class="active"/><text x="310.0" y="81" class="center">B: compute</text><rect x="505" y="54" width="155" height="44" rx="8" class="active"/><text x="582.5" y="81" class="center">A: resume</text><text x="24" y="145" class="">A’s I/O</text><rect x="255" y="117" width="235" height="44" rx="8" class="waiting"/><text x="372.5" y="144" class="center">Waiting for database</text><path d="M490 139 L510 106" class="connector" marker-end="url(#lanes-arrow)"/><text x="135" y="195" class="">Time →  CPU work alternates; request lifetimes overlap.</text><text x="24" y="245" class="">PARALLEL · two execution lanes</text><text x="24" y="297" class="">Lane 1</text><rect x="135" y="269" width="230" height="44" rx="8" class="active"/><text x="250.0" y="296" class="center">A: compute</text><text x="24" y="357" class="">Lane 2</text><rect x="135" y="329" width="230" height="44" rx="8" class="active"/><text x="250.0" y="356" class="center">B: compute</text><text x="395" y="310" class="">Both execute simultaneously.</text>
+          </svg>
+        </div>
+        <figcaption><strong>Overlap versus simultaneous execution.</strong> A waiting request can share one execution lane with other work. Parallel computation needs additional execution capacity. These blocks are schematic, not to scale.</figcaption>
+      </figure>
+
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Concurrent tasks overlap in lifetime; parallel work executes simultaneously.</li>
+        <li>I/O overlap can help even when application computation uses one execution lane.</li>
+        <li>Being ready to run does not guarantee immediate CPU access.</li>
+      </ul></div>
+
+      <h2>CPU-bound and I/O-bound work</h2>
+      <p>
+        A workload is CPU-bound when available computation substantially limits its progress, and
+        I/O-bound when waiting on input/output substantially limits it. These describe bottlenecks
+        under particular conditions, not permanent categories attached to an entire application.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Work</th><th>Typical component</th><th>Useful direction to investigate</th></tr></thead>
+        <tbody>
+          <tr><td>Waiting for a database or HTTP service</td><td>Network, dependency and possibly pool waiting</td><td>Overlap independent work and inspect downstream latency and capacity.</td></tr>
+          <tr><td>Reading or writing files</td><td>Storage work plus copying and processing</td><td>Use suitable I/O APIs and measure storage and execution separately.</td></tr>
+          <tr><td>JSON parsing, validation or compression</td><td>Application computation</td><td>Bound input size, profile costs and reduce or offload expensive work.</td></tr>
+          <tr><td>Encoding media or verifying cryptographic signatures</td><td>Computation, potentially with other bottlenecks</td><td>Consider optimized implementations and bounded parallel capacity.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        JWT signature verification concerns integrity and authenticity; it is not necessarily
+        decryption. Ordinary APIs can also become CPU-bound because of large JSON payloads, expensive
+        regular expressions, password hashing or excessive allocation. Do not assume CPU work always
+        takes under two milliseconds or that every backend bottleneck is I/O.
+      </p>
+      <p>
+        Parallel computation helps when the task can be divided and enough execution capacity exists.
+        More threads do not guarantee improvement: scheduling, synchronization, memory bandwidth and
+        serial dependencies can dominate. Concurrency helps organize both I/O and CPU tasks, while
+        parallelism is one way to execute some of that work faster.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Classify the measured bottleneck, not the programming language or application category.</li>
+        <li>I/O operations include CPU work around the wait, and ordinary APIs can become CPU-bound.</li>
+        <li>Use overlap for waiting and evaluate parallel capacity for computation without assuming linear speedup.</li>
+      </ul></div>
+
+      <h2>Processes, threads and memory</h2>
+      <p>
+        A process gives a running program an execution and resource context. Separate processes
+        normally have separate virtual address spaces; communication requires an explicit mechanism
+        such as messages, sockets or deliberately shared memory. Multiple native threads within a
+        process normally share its address space and resources.
+      </p>
+      <p>
+        Each native thread has its own execution state, including registers and a stack used for
+        call-related state. The process heap and globals can be accessible across threads, although
+        language runtimes may impose additional isolation or access rules. A local variable is not
+        guaranteed to physically occupy a stack slot: compilers can use registers, eliminate it or
+        arrange other storage.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Shared address space does not imply safe shared updates</div>
+        <pre><code>Process A
+  Thread 1: execution state + stack ─┐
+                                    ├─ shared process resources and heap
+  Thread 2: execution state + stack ─┘
+
+Process B: separate address space unless sharing is explicitly arranged</code></pre>
+      </div>
+      <p>
+        Sharing an object reference can avoid serialization, but it creates coordination and
+        lifetime obligations. A pointer does not establish ownership, thread safety or valid access.
+        Some runtimes also isolate ordinary objects across execution contexts even when those
+        contexts live in one process. See <a href="https://man7.org/linux/man-pages/man7/pthreads.7.html" target="_blank" rel="noopener noreferrer">the POSIX-thread overview <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+
+      <figure class="concept-diagram">
+        <div class="diagram-scroll" role="region" aria-label="Private execution state, shared process memory diagram" tabindex="0">
+          <svg viewBox="0 0 700 365" role="img" aria-labelledby="memory-title memory-desc">
+            <title id="memory-title">Private execution state, shared process memory</title>
+            <desc id="memory-desc">Two threads have separate registers and stacks and both point to the process heap and globals. A different process has a separate address space by default.</desc>
+            <defs><marker id="memory-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+            <text x="24" y="30" class="">ONE PROCESS · shared address space</text><rect x="30" y="55" width="260" height="44" rx="8" class=""/><text x="160.0" y="82" class="center">Thread A: registers + stack</text><rect x="410" y="55" width="260" height="44" rx="8" class=""/><text x="540.0" y="82" class="center">Thread B: registers + stack</text><path d="M160 99 L285 160" class="connector" marker-end="url(#memory-arrow)"/><path d="M540 99 L415 160" class="connector" marker-end="url(#memory-arrow)"/><rect x="200" y="165" width="300" height="44" rx="8" class="active"/><text x="350.0" y="192" class="center">Shared heap and globals</text><text x="45" y="255" class="">Threads keep separate execution state, but can access shared data.</text><rect x="30" y="290" width="640" height="44" rx="8" class="waiting"/><text x="350.0" y="317" class="center">Another process: separate address space by default</text>
+          </svg>
+        </div>
+        <figcaption><strong>Private execution state, shared process memory.</strong> Shared access makes communication easy; conflicting updates still need coordination. Runtime isolation rules may add further boundaries.</figcaption>
+      </figure>
+
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Separate processes normally isolate address spaces; native threads share process resources.</li>
+        <li>Each thread retains its own execution state and call stack.</li>
+        <li>Shared memory enables communication but requires explicit coordination and valid ownership.</li>
+      </ul></div>
+
+      <h2>Scheduling, blocking and waking up</h2>
+      <p>
+        The operating system schedules runnable native threads onto available logical processors.
+        It can preempt execution so other work gets a turn. The policy is more complex than a fixed
+        two-millisecond rotation and depends on platform, priorities and operating conditions.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Conceptual state</th><th>Meaning</th><th>Possible next event</th></tr></thead>
+        <tbody>
+          <tr><td>Running</td><td>Currently executing.</td><td>Finish, be preempted or wait for something.</td></tr>
+          <tr><td>Runnable</td><td>Able to make progress when scheduled.</td><td>Receive execution time.</td></tr>
+          <tr><td>Waiting / blocked</td><td>Cannot yet continue because a required event or resource is unavailable.</td><td>Be made runnable when the condition changes.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        In a blocking thread-based database client, waiting for more socket data can park the calling
+        thread. Other runnable threads can execute while it waits. If no runnable work exists, the
+        processor can idle; a well-behaved wait need not repeatedly consume CPU checking the socket.
+      </p>
+      <p>
+        Arrival of network data can make waiting work eligible again, but not necessarily run it
+        immediately. Receiving bytes also does not mean a complete database result has arrived: the
+        driver may need further reads, protocol parsing and error handling. Scheduling and the
+        application's I/O protocol are distinct layers.
+      </p>
+      <p>
+        For deeper operating-system foundations, see <a href="https://pages.cs.wisc.edu/~remzi/OSTEP/" target="_blank" rel="noopener noreferrer">Operating Systems: Three Easy Pieces <span role="img" aria-label="opens in a new tab">↗</span></a>.
+        Runtime tasks can have an additional scheduler above the OS, which is why a waiting coroutine
+        or goroutine is not always a blocked native thread.
+      </p>
+
+      <figure class="concept-diagram">
+        <div class="diagram-scroll" role="region" aria-label="A thread’s scheduling states diagram" tabindex="0">
+          <svg viewBox="0 0 700 305" role="img" aria-labelledby="states-title states-desc">
+            <title id="states-title">A thread’s scheduling states</title>
+            <desc id="states-desc">A runnable thread is scheduled to run. A running thread can be preempted back to runnable or block waiting for I/O. I/O readiness makes it runnable again; it does not immediately run.</desc>
+            <defs><marker id="states-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+            <rect x="30" y="65" width="165" height="44" rx="8" class=""/><text x="112.5" y="92" class="center">Runnable</text><path d="M195 87 L265 87" class="connector" marker-end="url(#states-arrow)"/><rect x="270" y="65" width="160" height="44" rx="8" class="active"/><text x="350.0" y="92" class="center">Running</text><path d="M430 87 L500 87" class="connector" marker-end="url(#states-arrow)"/><rect x="505" y="65" width="165" height="44" rx="8" class="waiting"/><text x="587.5" y="92" class="center">Waiting for I/O</text><text x="211" y="54" class="">scheduled</text><text x="447" y="54" class="">blocks</text><path d="M350 109 V165 H112 V114" class="connector" marker-end="url(#states-arrow)"/><text x="150" y="192" class="">Preemption: return to runnable</text><path d="M587 109 V240 H112 V114" class="connector" marker-end="url(#states-arrow)"/><text x="230" y="269" class="">I/O ready: return to runnable, then await scheduling</text>
+          </svg>
+        </div>
+        <figcaption><strong>A thread’s scheduling states.</strong> While A waits, the scheduler can run B. Waking A makes it eligible for CPU time; it does not give A immediate ownership of a core.</figcaption>
+      </figure>
+
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>The OS schedules runnable native threads and can preempt running ones.</li>
+        <li>A blocking wait can park one thread while others execute, without busy-waiting.</li>
+        <li>Readiness, complete protocol results and actual resumption are different events.</li>
+      </ul></div>
+
+      <h2>Thread costs and bounded thread pools</h2>
+      <p>
+        Native threads have creation, memory and scheduling costs. Their stacks may reserve virtual
+        address space whose resident physical use grows as pages are touched. Stack sizes vary by
+        platform and configuration, so neither an eight-megabyte stack nor a fixed committed-memory
+        cost applies universally.
+      </p>
+      <p>
+        A context switch saves and restores execution state and performs scheduling bookkeeping.
+        Its cost includes hardware and cache effects and is not one fixed microsecond value.
+        Thousands of sleeping threads are also different from thousands of runnable threads
+        competing for a few processors. Measure runnable queues, memory and switching activity.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Illustrative memory arithmetic with an explicit assumption</div>
+        <pre><code>If 10,000 active workers each retain 1 MiB of actual memory:
+  10,000 × 1 MiB = 10,000 MiB ≈ 9.77 GiB
+
+That assumption is not a universal native-thread footprint.
+Requests, buffers, libraries and application data add other costs.</code></pre>
+      </div>
+      <p>
+        A thread-based server can use a bounded pool instead of creating a fresh native thread for
+        every request. Blocking handlers can then express sequential logic while the OS schedules
+        other workers. The pool still needs limits, queueing policy, acquisition deadlines and
+        protection against slow operations occupying every worker.
+      </p>
+      <p>
+        Thread-per-request and pooled blocking designs exist and can be appropriate. Event-driven
+        or lightweight-task designs often reduce per-waiting-task overhead at high concurrency,
+        but the best model depends on libraries, resource limits and workload. A concurrency mechanism
+        should be evaluated with the same <a href="17-scaling-performance.html">capacity measurements</a>
+        as any other component.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Native threads have variable memory and scheduling costs; reserved and resident memory differ.</li>
+        <li>Bounded thread pools reuse workers and constrain resource demand.</li>
+        <li>Compare complete workloads rather than assuming every thread-based design is inefficient.</li>
+      </ul></div>
+
+      <h2>Event loops and operating-system I/O</h2>
+      <p>
+        Event loops are not specific to JavaScript. Node.js uses one to coordinate JavaScript
+        callbacks, and Python's asyncio uses one to coordinate coroutine tasks. A language can
+        support several concurrency models; the server, runtime and libraries determine which
+        model your backend actually uses.
+      </p>
+      <p>
+        An event loop coordinates ready callbacks or tasks, timers and I/O notifications. A handler
+        initiates an operation and arranges how execution should continue when it can make progress.
+        The loop can handle other ready work while that operation is pending.
+      </p>
+      <p>
+        A loop does not need to scan every connection continuously. Operating systems provide
+        efficient notification mechanisms: epoll on Linux, kqueue on BSD-derived systems including
+        macOS, and completion-based mechanisms such as IOCP on Windows. A loop can sleep while
+        awaiting events instead of burning a core in a busy polling loop. See
+        <a href="https://docs.libuv.org/en/v1.x/design.html" target="_blank" rel="noopener noreferrer">libuv's design overview <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <div class="msg">
+        <div class="msg-head">A conceptual iteration, not an exact runtime implementation</div>
+        <pre><code>Run eligible callbacks or task continuations.
+Determine whether timers or registered I/O can make progress.
+Wait for notifications when there is no ready work.
+Queue or dispatch the resulting work according to runtime rules.
+Repeat while the runtime has work to manage.</code></pre>
+      </div>
+      <p>
+        Readiness and completion are different APIs. A readable socket may offer only part of a
+        message; an attempted operation may still need to handle errors or try again. The driver
+        owns protocol state and decides when the application has a complete result.
+      </p>
+      <p>
+        There are still costs: task records, buffers, callback dispatch, runtime bookkeeping and
+        ordinary OS scheduling. A single loop thread can itself be preempted by the OS. Event loops
+        do not eliminate all context switches, and a system can run several event loops on different
+        threads or processes. The relevant advantage is how waiting work is represented and resumed.
+      </p>
+
+      <figure class="concept-diagram">
+        <div class="diagram-scroll" role="region" aria-label="How an event loop overlaps I/O diagram" tabindex="0">
+          <svg viewBox="0 0 700 330" role="img" aria-labelledby="loop-title loop-desc">
+            <title id="loop-title">How an event loop overlaps I/O</title>
+            <desc id="loop-desc">A callback starts I/O and retains a continuation. Other ready work runs. An OS notification makes continuation work eligible; it executes when scheduled. When nothing is ready, the loop can sleep awaiting events.</desc>
+            <defs><marker id="loop-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+            <rect x="30" y="35" width="260" height="44" rx="8" class="active"/><text x="160.0" y="62" class="center">1. Run a short callback</text><path d="M290 57 L390 57" class="connector" marker-end="url(#loop-arrow)"/><rect x="395" y="35" width="275" height="44" rx="8" class=""/><text x="532.5" y="62" class="center">2. Start asynchronous I/O</text><path d="M532 79 L532 140" class="connector" marker-end="url(#loop-arrow)"/><rect x="395" y="145" width="275" height="44" rx="8" class="waiting"/><text x="532.5" y="172" class="center">3. Retain continuation</text><path d="M395 167 L300 167" class="connector" marker-end="url(#loop-arrow)"/><rect x="30" y="145" width="265" height="44" rx="8" class="active"/><text x="162.5" y="172" class="center">4. Run other ready work</text><path d="M162 189 L162 255" class="connector" marker-end="url(#loop-arrow)"/><rect x="30" y="260" width="640" height="44" rx="8" class=""/><text x="350.0" y="287" class="center">5. I/O notification → queue continuation → run when scheduled</text><path d="M670 282 H685 V15 H162 V30" class="connector" marker-end="url(#loop-arrow)"/>
+          </svg>
+        </div>
+        <figcaption><strong>How an event loop overlaps I/O.</strong> The loop manages ready work instead of dedicating a blocked native thread to each pending operation. A long synchronous callback delays the other callbacks.</figcaption>
+      </figure>
+
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Event loops resume ready work using I/O notifications and runtime queues.</li>
+        <li>Efficient pollers can sleep; they do not require constant connection-by-connection scanning.</li>
+        <li>The model still uses memory, runtime work and OS scheduling.</li>
+      </ul></div>
+
+      <h2>Python: threads, processes and asyncio</h2>
+      <p>
+        <strong>Python supports both native threads and event-loop concurrency.</strong> It does
+        not have one mandatory backend architecture. A synchronous application can run in worker
+        processes or a thread pool; an asynchronous application can run coroutine tasks on an
+        event loop. A deployment can combine these approaches.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Model</th><th>How requests progress</th><th>What a database wait does</th></tr></thead>
+        <tbody>
+          <tr><td>Synchronous worker processes</td><td>Separate processes handle work independently. A basic synchronous worker handles one request at a time.</td><td>A blocking driver occupies that worker until it can continue; other worker processes can serve requests.</td></tr>
+          <tr><td>Native thread pool</td><td>Several OS threads handle work within a process and share its memory.</td><td>A blocking socket wait can park the calling thread while another thread runs.</td></tr>
+          <tr><td>asyncio event loop</td><td>Tasks share a loop thread and yield cooperatively when an awaited operation needs to suspend.</td><td>An async-compatible driver lets the task suspend while other ready tasks run on the loop.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Python's <code>threading</code> module provides native-thread concurrency. In a
+        GIL-enabled CPython process, only one thread executes Python bytecode at a time, but many
+        blocking I/O operations release the GIL, so threads can overlap I/O waits. CPU-heavy pure
+        Python work commonly uses separate processes for parallel execution. Native extensions
+        that release the GIL and free-threaded CPython builds have different parallelism behavior.
+        See <a href="https://docs.python.org/3/library/threading.html" target="_blank" rel="noopener noreferrer">Python's thread and GIL documentation <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        With <code>asyncio</code>, a loop normally executes one task at a time on its thread.
+        Calling <code>async def</code> creates a coroutine object; awaiting or scheduling it enables
+        execution. Unlike JavaScript, awaiting a Python coroutine does not necessarily yield to
+        other tasks if it can complete without suspending. A blocking database driver or
+        <code>time.sleep()</code> called directly on the loop thread still blocks it. Use compatible
+        async APIs or an appropriate bounded executor for blocking operations. Async syntax alone
+        does not supply CPU parallelism. See <a href="https://docs.python.org/3/library/asyncio.html" target="_blank" rel="noopener noreferrer">the asyncio overview <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <h3>WSGI and ASGI describe the server/application interface</h3>
+      <p>
+        <strong>WSGI</strong> exposes a synchronous application interface. Its server configuration
+        determines whether concurrency comes from processes, threads or another supported worker
+        model; WSGI does not mean “one thread per request.” <strong>ASGI</strong> exposes an
+        asynchronous, event-based interface suitable for async HTTP handling and WebSockets.
+        ASGI servers commonly use an event loop, and synchronous application code can be adapted
+        through threads. Neither interface fixes the total worker or thread count.
+        See <a href="https://asgi.readthedocs.io/en/latest/introduction.html" target="_blank" rel="noopener noreferrer">the ASGI introduction and WSGI comparison <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Django illustrates why deployment matters: it supports both interfaces. Its async views
+        under WSGI use a one-off event loop, while an appropriately configured ASGI stack supports
+        asynchronous request handling across the stack. Synchronous middleware can require thread
+        adaptation. Check the framework, server worker configuration, middleware and database
+        driver together before describing a Python backend as threaded or event-driven.
+        See <a href="https://docs.djangoproject.com/en/5.2/topics/async/" target="_blank" rel="noopener noreferrer">Django's async deployment explanation <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Python supports threads, processes and event-loop tasks; the deployment selects their combination.</li>
+        <li>Threads can overlap I/O even with the GIL; pure Python CPU parallelism needs suitable execution resources and runtime support.</li>
+        <li>WSGI is a synchronous interface and ASGI an asynchronous interface; neither alone specifies the complete worker architecture.</li>
+        <li>asyncio needs nonblocking libraries or appropriate offloading, and an await does not always suspend.</li>
+      </ul></div>
+
+      <h2>Node.js: keep the event loop responsive</h2>
+      <p>
+        JavaScript callbacks ordinarily execute one at a time within a Node.js event-loop context.
+        Node itself also uses other threads and native mechanisms. Typical asynchronous network I/O
+        uses OS facilities, while selected filesystem, DNS and native operations can use libuv's
+        worker pool. The database performs its own work outside the Node process too.
+      </p>
+      <p>
+        A long synchronous callback keeps other JavaScript callbacks in that context from running.
+        That can delay unrelated requests, timers, response processing and cancellation handlers.
+        Large JSON parsing, pathological regular expressions or expensive computations can create
+        this problem even in an ordinary API. See <a href="https://nodejs.org/en/learn/asynchronous-work/dont-block-the-event-loop" target="_blank" rel="noopener noreferrer">Node's event-loop and worker-pool guidance <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Declaring a function async or wrapping a calculation in a Promise does not move the calculation
+        to another core. The synchronous part still runs where it is called. Similarly,
+        <code>await computeSynchronously()</code> first evaluates that call; it does not offload its work.
+      </p>
+      <p>
+        Reduce unnecessary work, bound inputs, use suitable asynchronous APIs, or move substantial
+        CPU work to a bounded worker pool or separate process. Node's
+        <a href="https://nodejs.org/api/worker_threads.html" target="_blank" rel="noopener noreferrer">worker_threads <span role="img" aria-label="opens in a new tab">↗</span></a> can run JavaScript in
+        parallel, but dispatch, transfer and synchronization have costs. Ordinary objects are not
+        automatically shared across worker isolates; explicit sharing or transfer APIs have their own rules.
+      </p>
+      <p>
+        Breaking work into small scheduled chunks may improve responsiveness without making it
+        parallel. Repeatedly awaiting already-resolved Promises is not a guarantee that pending I/O
+        or timers get a turn, because microtask processing can dominate the loop.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>One JavaScript event-loop context runs callbacks serially, while Node uses additional native machinery.</li>
+        <li>Async syntax does not offload synchronous computation or make it nonblocking.</li>
+        <li>Bound callback work and use appropriate, bounded parallel workers for substantial CPU tasks.</li>
+      </ul></div>
+
+      <h2>What JavaScript await actually suspends</h2>
+      <p>
+        Calling a JavaScript async function returns a Promise. Its body begins executing synchronously
+        until it suspends at await or completes. Await waits for an awaitable value within that
+        function; it does not block the whole thread while the value is pending. The continuation
+        resumes through Promise job scheduling, normally described as microtasks.
+      </p>
+      <div class="msg">
+        <div class="msg-head">JavaScript module example: synchronous prefix, then continuation</div>
+        <pre><code>const events = [];
+
+async function task() {
+  events.push("before await");
+  await Promise.resolve();
+  events.push("after await");
+}
+
+const done = task();
+events.push("caller continues");
+await done;
+
+// events: ["before await", "caller continues", "after await"]</code></pre>
+      </div>
+      <p>
+        Even an already-fulfilled Promise schedules the code after await for a later continuation.
+        That does not promise which unrelated timer or network callback will run next. If the awaited
+        Promise rejects, the await expression throws within the async function, so ordinary try/catch
+        can handle it; unhandled failure rejects the function's returned Promise.
+      </p>
+      <p>
+        Await is supported inside async functions and at the top level of JavaScript modules. It is
+        not generally valid at the top level of a classic script. It also does not automatically
+        return the HTTP response: the surrounding handler must still send or return the result.
+        See <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/await" target="_blank" rel="noopener noreferrer">await semantics <span role="img" aria-label="opens in a new tab">↗</span></a>
+        and <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/async_function" target="_blank" rel="noopener noreferrer">async functions <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+
+      <figure class="concept-diagram">
+        <div class="diagram-scroll" role="region" aria-label="The async function pauses; the thread can keep working diagram" tabindex="0">
+          <svg viewBox="0 0 700 410" role="img" aria-labelledby="await-title await-desc">
+            <title id="await-title">The async function pauses; the thread can keep working</title>
+            <desc id="await-desc">Calling an async function runs its synchronous prefix. At await, the function suspends and its caller can continue. Promise settlement schedules the continuation; execution resumes after await through microtask scheduling.</desc>
+            <defs><marker id="await-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+            <text x="25" y="30" class="">CALLER</text><rect x="25" y="50" width="280" height="44" rx="8" class=""/><text x="165.0" y="77" class="center">Call async function</text><path d="M305 72 L385 72" class="connector" marker-end="url(#await-arrow)"/><rect x="390" y="50" width="285" height="44" rx="8" class="active"/><text x="532.5" y="77" class="center">Run synchronous prefix</text><path d="M532 94 L532 140" class="connector" marker-end="url(#await-arrow)"/><rect x="390" y="145" width="285" height="44" rx="8" class="waiting"/><text x="532.5" y="172" class="center">await: suspend this function</text><path d="M390 167 L310 167" class="connector" marker-end="url(#await-arrow)"/><rect x="25" y="145" width="280" height="44" rx="8" class="active"/><text x="165.0" y="172" class="center">Caller can continue</text><rect x="25" y="250" width="280" height="44" rx="8" class=""/><text x="165.0" y="277" class="center">Promise settles</text><path d="M305 272 L385 272" class="connector" marker-end="url(#await-arrow)"/><rect x="390" y="250" width="285" height="44" rx="8" class=""/><text x="532.5" y="277" class="center">Schedule continuation</text><path d="M532 294 L532 335" class="connector" marker-end="url(#await-arrow)"/><rect x="390" y="340" width="285" height="44" rx="8" class="active"/><text x="532.5" y="367" class="center">Resume after await</text><text x="25" y="367" class="">No automatic CPU offloading.</text>
+          </svg>
+        </div>
+        <figcaption><strong>The async function pauses; the thread can keep working.</strong> Even an already-fulfilled Promise resumes after await through a later continuation. The function call before await can still do synchronous, blocking work.</figcaption>
+      </figure>
+
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>JavaScript runs an async function's synchronous prefix before its first suspension.</li>
+        <li>Await suspends the function's continuation, with Promise-based success and failure handling.</li>
+        <li>Top-level await belongs to modules, and suspension does not automatically send a response.</li>
+      </ul></div>
+
+      <h2>Think of suspension as saved execution state</h2>
+      <p>
+        A state machine is a useful model for an async function with several waits. The system must
+        retain enough information to know what comes next and which local values survive suspension.
+        That may be represented through compiler-generated state, Promise continuations, runtime
+        objects or a combination. It is not a requirement that every language literally rewrites the
+        function into the same switch statement.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Conceptual progression for two dependent operations</div>
+        <pre><code>State 0: start fetching the user
+         suspend until a result or error is available
+State 1: keep the user; start fetching their dependent data
+         suspend until a result or error is available
+State 2: combine the values and complete
+
+At each suspension: retain required locals and continuation state.
+At failure: follow the function's error path, not necessarily the next success state.</code></pre>
+      </div>
+      <p>
+        The saved state consumes memory even while no CPU executes the function. Native threads
+        preserve execution using thread state and stacks; stackful runtime tasks also retain stacks;
+        stackless async designs retain the state needed across suspension points. These are different
+        representations of a suspended computation, not “memory versus no memory.”
+      </p>
+      <p>
+        A task can resume only when it is eligible and the scheduler gives it execution time. A loop
+        blocked by a long callback cannot run its other continuations meanwhile. Returning from a
+        callback, suspending a coroutine, finishing a function and completing an HTTP response are
+        separate events that should not be confused.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Suspension retains the values and continuation needed to resume later.</li>
+        <li>A state machine is a mental model; exact implementation varies by compiler and runtime.</li>
+        <li>Saved computations still consume memory and need scheduled execution to progress.</li>
+      </ul></div>
+
+      <h2>Sequential awaits versus overlapping operations</h2>
+      <p>
+        An async function can still issue operations sequentially. If it awaits a user lookup before
+        starting an order lookup, those operations do not overlap within that function. Other requests
+        can progress meanwhile, but that is a different source of concurrency.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Sequential operations through an illustrative Promise-based database API</div>
+        <pre><code>async function loadSequential(db, userId) {
+  const user = await db.getUser(userId);
+  const orders = await db.getOrders(userId);
+  return { user, orders };
+}</code></pre>
+      </div>
+      <p>
+        If both reads are independent and already authorized, they can be started before waiting
+        for both results. Here the calls start the operations; Promise.all combines their completion.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Overlap two independent operations</div>
+        <pre><code>async function loadConcurrent(db, userId) {
+  const [user, orders] = await Promise.all([
+    db.getUser(userId),
+    db.getOrders(userId)
+  ]);
+  return { user, orders };
+}</code></pre>
+      </div>
+      <p>
+        In an idealized model, waits of 40 ms and 60 ms contribute about 100 ms sequentially versus
+        about 60 ms when they overlap. Actual behavior depends on connection availability, server
+        capacity and consistency requirements. A single database connection or transaction may
+        serialize operations, and dependent or ordered operations cannot simply be overlapped.
+      </p>
+      <p>
+        Promise.all does not provide CPU parallelism or a concurrency limit. If one input rejects,
+        the combined Promise rejects without automatically cancelling the other operations. Define
+        error and cancellation behavior and avoid starting thousands of calls merely because an
+        array makes it convenient. See <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/all" target="_blank" rel="noopener noreferrer">Promise.all semantics <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Two sequential awaits do not automatically overlap their underlying operations.</li>
+        <li>Start independent, authorized work together only when downstream capacity and consistency permit it.</li>
+        <li>Promise.all coordinates results; it neither limits concurrency nor automatically cancels sibling operations.</li>
+      </ul></div>
+
+      <h2>Similar syntax, different runtime contracts</h2>
+      <p>
+        Async/await is not one universal execution model. Learn when a call begins work, how it is
+        scheduled, what can suspend it and where its computation runs. Surface syntax alone cannot
+        answer those questions.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Environment</th><th>Important distinction</th><th>Primary reference</th></tr></thead>
+        <tbody>
+          <tr><td>JavaScript</td><td>An async call runs its synchronous prefix immediately and returns a Promise.</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/async_function" target="_blank" rel="noopener noreferrer">Async functions <span role="img" aria-label="opens in a new tab">↗</span></a></td></tr>
+          <tr><td>Python asyncio</td><td>Calling async def normally creates a coroutine object; it must be awaited or appropriately scheduled to execute.</td><td><a href="https://docs.python.org/3/library/asyncio-task.html" target="_blank" rel="noopener noreferrer">Coroutines and tasks <span role="img" aria-label="opens in a new tab">↗</span></a></td></tr>
+          <tr><td>Rust async</td><td>A future makes progress when polled; wakeups inform an executor that further progress may be possible.</td><td><a href="https://rust-lang.github.io/async-book/02_execution/03_wakeups.html" target="_blank" rel="noopener noreferrer">Futures and wakeups <span role="img" aria-label="opens in a new tab">↗</span></a></td></tr>
+          <tr><td>Go</td><td>The go statement starts a goroutine, and ordinary-looking blocking calls interact with the runtime and OS mechanisms.</td><td><a href="https://go.dev/doc/faq#goroutines" target="_blank" rel="noopener noreferrer">Goroutines <span role="img" aria-label="opens in a new tab">↗</span></a></td></tr>
+          <tr><td>Java virtual threads</td><td>The runtime schedules lightweight virtual threads over underlying platform threads.</td><td><a href="https://docs.oracle.com/en/java/javase/25/core/virtual-threads.html" target="_blank" rel="noopener noreferrer">Virtual threads <span role="img" aria-label="opens in a new tab">↗</span></a></td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        A synchronous database driver called directly inside an async handler can still block its
+        event-loop thread. The keyword does not transform an arbitrary library into a nonblocking
+        driver. Some runtimes provide supported ways to run blocking code in an executor or thread
+        pool; those pools also need limits.
+      </p>
+      <p>
+        Python's threading behavior also depends on the implementation and build. In GIL-enabled
+        CPython, the GIL limits simultaneous Python bytecode execution; native extensions can release
+        it, separate processes provide another option, and free-threaded builds change the contract.
+        Do not treat “Python threads can never run in parallel” as a universal rule. See
+        <a href="https://docs.python.org/3/library/threading.html" target="_blank" rel="noopener noreferrer">Python's threading documentation <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Verify call, scheduling and suspension semantics for the actual runtime and driver.</li>
+        <li>Async syntax cannot make a synchronous blocking library nonblocking by itself.</li>
+        <li>Runtime and build choices affect available parallelism and supported execution models.</li>
+      </ul></div>
+
+      <h2>Go's scheduler: goroutines, threads and execution slots</h2>
+      <p>
+        A goroutine is a runtime-managed execution task with a stack that starts small and can grow.
+        It is not a separate OS thread. Go can multiplex many goroutines over native threads and
+        schedule runnable work while another goroutine waits. Goroutines still consume memory and
+        scheduling resources; creating them without bound is not free.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Runtime term</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td>G</td><td>A goroutine: the computation and its execution state.</td></tr>
+          <tr><td>M</td><td>An OS thread that may execute Go, runtime or syscall work, or be idle.</td></tr>
+          <tr><td>P</td><td>Runtime resources and permission needed to execute user Go code; the number is governed by GOMAXPROCS.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        The scheduler matches runnable goroutines with the resources and threads that can execute
+        them. It has run queues, scheduling policies and preemption mechanisms. A goroutine switch
+        involves preserving execution state and runtime bookkeeping; describing it as “just changing
+        one pointer” hides the work. See <a href="https://go.dev/src/runtime/HACKING" target="_blank" rel="noopener noreferrer">Go's runtime notes <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        GOMAXPROCS bounds simultaneous execution of user Go code; it is not a cap on the total number
+        of OS threads. Some threads can be blocked in system calls while others run. Its default
+        depends on runtime version and available CPU constraints, so check the deployed environment
+        rather than assuming it always equals physical cores. See <a href="https://pkg.go.dev/runtime#GOMAXPROCS" target="_blank" rel="noopener noreferrer">the runtime reference <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Goroutines can therefore provide concurrency and, when resources permit, parallel execution.
+        They still ultimately execute on OS-managed threads. Runtime scheduling complements OS
+        scheduling rather than replacing it.
+      </p>
+
+      <figure class="concept-diagram">
+        <div class="diagram-scroll" role="region" aria-label="Go multiplexes tasks over execution resources diagram" tabindex="0">
+          <svg viewBox="0 0 700 410" role="img" aria-labelledby="go-title go-desc">
+            <title id="go-title">Go multiplexes tasks over execution resources</title>
+            <desc id="go-desc">G1 and G2 are candidates for P1, G3 for P2, and G4 is waiting. P1 and P2 supply resources to OS threads M1 and M2. This is an illustrative assignment, not a permanent mapping.</desc>
+            <defs><marker id="go-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+            <text x="25" y="30" class="">MANY GOROUTINES</text><rect x="25" y="50" width="140" height="44" rx="8" class=""/><text x="95.0" y="77" class="center">G1</text><rect x="190" y="50" width="140" height="44" rx="8" class=""/><text x="260.0" y="77" class="center">G2</text><rect x="355" y="50" width="140" height="44" rx="8" class=""/><text x="425.0" y="77" class="center">G3</text><rect x="520" y="50" width="155" height="44" rx="8" class="waiting"/><text x="597.5" y="77" class="center">G4 waiting</text><path d="M95 94 L180 155" class="connector" marker-end="url(#go-arrow)"/><path d="M260 94 L180 155" class="connector" marker-end="url(#go-arrow)"/><path d="M425 94 L470 155" class="connector" marker-end="url(#go-arrow)"/><rect x="55" y="160" width="250" height="44" rx="8" class="active"/><text x="180.0" y="187" class="center">P1: execution resources</text><rect x="345" y="160" width="250" height="44" rx="8" class="active"/><text x="470.0" y="187" class="center">P2: execution resources</text><path d="M180 204 L180 250" class="connector" marker-end="url(#go-arrow)"/><path d="M470 204 L470 250" class="connector" marker-end="url(#go-arrow)"/><rect x="55" y="255" width="250" height="44" rx="8" class=""/><text x="180.0" y="282" class="center">M1: OS thread</text><rect x="345" y="255" width="250" height="44" rx="8" class=""/><text x="470.0" y="282" class="center">M2: OS thread</text><text x="35" y="345" class="">Illustration: GOMAXPROCS = 2; at most two user Go tasks execute.</text><text x="35" y="375" class="">G4 can become runnable later. Other OS threads may exist.</text>
+          </svg>
+        </div>
+        <figcaption><strong>Go multiplexes tasks over execution resources.</strong> Goroutines can migrate as scheduling changes. GOMAXPROCS limits simultaneous user Go execution; it does not limit the total OS thread count.</figcaption>
+      </figure>
+
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Goroutines are lightweight runtime tasks multiplexed over OS threads.</li>
+        <li>G, M and P describe computation, native threads and user-code execution resources.</li>
+        <li>GOMAXPROCS limits simultaneous user Go execution, not all native threads or all work in the system.</li>
+      </ul></div>
+
+      <h2>Go HTTP handlers and network waiting</h2>
+      <p>
+        Go's HTTP server lets handlers use ordinary sequential-looking code while other requests
+        progress. Network operations supported by the runtime can park the waiting goroutine and
+        arrange for it to become runnable when the socket can make progress. Go also uses network
+        polling machinery, so goroutines and event-driven I/O are not mutually exclusive ideas.
+      </p>
+      <p>
+        A blocking system call can occupy an OS thread; the runtime can arrange for other goroutines
+        to execute elsewhere. The exact behavior depends on the operation and library. A goroutine
+        does not make an arbitrary CPU-heavy loop, native call or driver instantly interruptible.
+      </p>
+      <p>
+        Be precise when reading server source. The documented <code>net/http.Server.Serve</code>
+        behavior creates a service goroutine per accepted connection, which then reads requests and
+        calls the handler. That statement is not the same as one fresh goroutine per HTTP/1.1 request:
+        a persistent connection can carry several requests. HTTP/2 adds stream handling and different
+        concurrency behavior. See <a href="https://pkg.go.dev/net/http#Server.Serve" target="_blank" rel="noopener noreferrer">the HTTP server contract <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Database calls can wait to acquire a pool connection, send data, receive data and iterate
+        results. The wait is not confined to the source-code line that first issues a query. Carry
+        request deadlines through supported APIs, release rows and connections correctly, and bound
+        downstream work. A large number of cheap goroutines can still exhaust a database pool or
+        retain substantial response memory.
+      </p>
+      <p>
+        Request handlers can access shared application state concurrently, so the concurrency model
+        does not remove the need for synchronization. See <a href="https://go.dev/doc/faq#goroutines" target="_blank" rel="noopener noreferrer">Go's goroutine explanation <span role="img" aria-label="opens in a new tab">↗</span></a>
+        and <a href="15-graceful-shutdown.html">request and worker lifetime management</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Go combines runtime task scheduling with native threads and network polling.</li>
+        <li>Connection goroutines, HTTP requests and protocol streams are distinct concepts.</li>
+        <li>Use deadlines, resource cleanup and downstream limits even when goroutines make concurrency easy.</li>
+      </ul></div>
+
+      <h2>Shared-state races and lost updates</h2>
+      <p>
+        Two tasks increment a shared counter that starts at zero. A conceptual increment reads the
+        current value, calculates a replacement and writes it back. If those steps are not protected
+        as the required atomic operation, the tasks can overwrite one another's updates.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Step</th><th>Task A</th><th>Task B</th><th>Shared counter</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>Reads 0</td><td></td><td>0</td></tr>
+          <tr><td>2</td><td></td><td>Reads 0</td><td>0</td></tr>
+          <tr><td>3</td><td>Computes 1</td><td></td><td>0</td></tr>
+          <tr><td>4</td><td></td><td>Computes 1</td><td>0</td></tr>
+          <tr><td>5</td><td>Writes 1</td><td></td><td>1</td></tr>
+          <tr><td>6</td><td></td><td>Writes 1</td><td>1</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        The expected value after two valid increments is two, but this interleaving leaves one.
+        This is an illustrative lost update, not a promise about the exact machine instructions
+        generated for every language. Some operations are atomic; some unsynchronized programs have
+        undefined or otherwise restricted behavior under their language memory model.
+      </p>
+      <p>
+        A <strong>data race</strong> involves conflicting unsynchronized memory accesses under the
+        relevant language's rules. A broader <strong>race condition</strong> means correctness depends
+        on an uncontrolled ordering or timing. Not every logical race requires simultaneous native
+        thread execution or a shared-memory data race. See <a href="https://go.dev/ref/mem" target="_blank" rel="noopener noreferrer">the Go memory model <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        Synchronization must establish both the required ordering and the visibility of writes.
+        Sleeping for a guessed duration or observing that a test usually passes does not establish
+        either property. Identify the invariant and the complete operation that needs protection.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Read-modify-write sequences can lose updates when their steps interleave without suitable protection.</li>
+        <li>A data race and a logical race condition are related but different concepts.</li>
+        <li>Define the invariant and use real ordering and synchronization guarantees, not timing guesses.</li>
+      </ul></div>
+
+      <h2>Single-threaded async code can race too</h2>
+      <p>
+        A JavaScript function can check a shared value, suspend at await, then resume after another
+        function has changed that value. No two JavaScript statements need to execute simultaneously
+        for the overall check-then-act operation to become incorrect.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Unsafe illustrative function: the check and update straddle a suspension</div>
+        <pre><code>let balance = 100;
+
+async function withdraw(amount) {
+  if (balance &lt; amount) return false;
+  await processWithdrawal(amount);
+  balance -= amount;
+  return true;
+}
+
+const results = await Promise.all([withdraw(100), withdraw(100)]);
+// Both can pass the check before either update.
+// results can be [true, true], with balance ending at -100.</code></pre>
+      </div>
+      <p>
+        With an asynchronous processWithdrawal implementation, the first call sees 100 and suspends.
+        The second call also sees 100 and suspends. Later, one subtracts 100 and the other subtracts
+        another 100. The early condition did not reserve capacity or protect the later change.
+      </p>
+      <p>
+        The external action can already have happened twice before the local variable exposes the
+        problem. Protecting only the final subtraction is therefore insufficient. Moving a subtraction
+        before await also introduces recovery questions if the external operation fails. The complete
+        workflow needs an ownership, atomicity and failure policy appropriate to its storage and side effects.
+      </p>
+      <p>
+        Similar races appear in inventory reservations, duplicate job creation, cache refreshes and
+        unique-resource allocation. Look for assumptions that were true before a suspension but may
+        not be true when execution continues. A single-threaded event loop serializes individual
+        execution segments, not the entire logical workflow across awaits.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Check-then-act workflows can interleave across awaits on one event-loop thread.</li>
+        <li>Protect the full invariant and external effect, not only the final local assignment.</li>
+        <li>Revisit every assumption that must survive a suspension point.</li>
+      </ul></div>
+
+      <h2>Locks, atomic operations and database coordination</h2>
+      <p>
+        A mutex provides exclusive entry to a protected critical section. For a counter, protect
+        the whole read-modify-write operation and ensure every competing access follows the same
+        rule. In Python, a context manager releases a threading lock even when the body raises:
+      </p>
+      <div class="msg">
+        <div class="msg-head">A process-local threaded counter</div>
+        <pre><code>import threading
+
+counter = 0
+lock = threading.Lock()
+
+def increment():
+    global counter
+    with lock:
+        counter += 1</code></pre>
+      </div>
+      <p>
+        Use primitives appropriate to the scheduler: blocking a loop thread on a native lock can
+        prevent the task holding the resource from progressing. Async-aware locks suspend tasks
+        according to their runtime. Locks can also deadlock when tasks acquire resources in conflicting
+        orders. Keep ownership clear, establish consistent ordering and avoid unnecessary long critical sections.
+      </p>
+      <p>
+        An atomic increment can suit a simple counter, but does not automatically protect a multi-step
+        business invariant. A local mutex also cannot coordinate independent application replicas
+        updating shared database state. Put durable constraints and conditional changes at the authority
+        that owns that state.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Illustrative atomic conditional debit of positive integer credit units</div>
+        <pre><code>UPDATE accounts
+SET balance = balance - $1
+WHERE id = $2
+  AND $1 &gt; 0
+  AND balance &gt;= $1
+RETURNING balance;</code></pre>
+      </div>
+      <p>
+        Validate the amount and account access before this operation and handle an empty result as
+        failure to apply the change. A separate SELECT followed by UPDATE is not made safe merely
+        by adding a transaction without appropriate locking, isolation or conflict handling. More
+        complex changes can need row locks, version checks or retryable transactions. See
+        <a href="https://www.postgresql.org/docs/current/transaction-iso.html" target="_blank" rel="noopener noreferrer">PostgreSQL's transaction-isolation semantics <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        External payments, messages and database changes still need explicit idempotency and recovery;
+        a local lock does not make them one atomic transaction. See <a href="10-background-jobs.html">durable retries</a>
+        and <a href="18-distributed-scaling.html">outbox and distributed workflow boundaries</a>.
+      </p>
+
+      <figure class="concept-diagram">
+        <div class="diagram-scroll" role="region" aria-label="Protect the whole read-modify-write operation diagram" tabindex="0">
+          <svg viewBox="0 0 700 385" role="img" aria-labelledby="mutex-title mutex-desc">
+            <title id="mutex-title">Protect the whole read-modify-write operation</title>
+            <desc id="mutex-desc">Without protection, A and B both read zero and write one, losing an increment. With the same mutex around both operations, A writes one and unlocks before B reads one and writes two.</desc>
+            <defs><marker id="mutex-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+            <text x="25" y="30" class="">UNPROTECTED · lost update</text><rect x="25" y="50" width="260" height="44" rx="8" class=""/><text x="155.0" y="77" class="center">A reads 0 → computes 1</text><rect x="410" y="50" width="265" height="44" rx="8" class=""/><text x="542.5" y="77" class="center">B reads 0 → computes 1</text><path d="M155 94 L285 145" class="connector" marker-end="url(#mutex-arrow)"/><path d="M542 94 L415 145" class="connector" marker-end="url(#mutex-arrow)"/><rect x="205" y="150" width="290" height="44" rx="8" class="waiting"/><text x="350.0" y="177" class="center">Both write 1; final value = 1</text><text x="25" y="240" class="">WITH A MUTEX · serialized critical sections</text><rect x="25" y="260" width="285" height="44" rx="8" class="active"/><text x="167.5" y="287" class="center">A locks → reads 0 → writes 1</text><path d="M310 282 L375 282" class="connector" marker-end="url(#mutex-arrow)"/><rect x="380" y="260" width="295" height="44" rx="8" class="active"/><text x="527.5" y="287" class="center">B locks → reads 1 → writes 2</text><text x="70" y="345" class="">A unlocks before B enters. Both updates survive; final value = 2.</text>
+          </svg>
+        </div>
+        <figcaption><strong>Protect the whole read-modify-write operation.</strong> Every competing access must follow the same synchronization policy. A process-local mutex protects only participating tasks in that process.</figcaption>
+      </figure>
+
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Use suitable locks or atomic operations to protect the entire invariant and establish ordering.</li>
+        <li>Process-local synchronization does not protect shared database state across replicas.</li>
+        <li>Use conditional database operations or appropriate transaction coordination and handle conflicts explicitly.</li>
+      </ul></div>
+
+      <h2>Message passing and ownership</h2>
+      <p>
+        Another design gives one task ownership of mutable state. Other tasks send requests or
+        messages to that owner rather than modifying the state directly. A counter owner, for
+        example, receives increment messages and applies each update through its own execution path.
+      </p>
+      <div class="msg">
+        <div class="msg-head">Conceptual single-owner counter</div>
+        <pre><code>Producer A ── increment message ──┐
+                                 ├─ bounded mailbox → owner → counter state
+Producer B ── increment message ──┘
+
+Only the owner changes the counter.
+Replies describe the result after the owner applies the operation.</code></pre>
+      </div>
+      <p>
+        Go channels can support this style and provide synchronization under documented rules.
+        A channel is not a blanket race-prevention guarantee. If a message contains a pointer and
+        senders keep mutating the pointed-to object, shared-state races can remain. Define whether
+        a message transfers ownership, copies data or grants shared immutable access.
+      </p>
+      <p>
+        Mailboxes and channels also have capacity, blocking, shutdown and ordering behavior. A slow
+        owner can become a bottleneck, and a full queue needs backpressure or an explicit overflow
+        policy. Waiting for a reply can deadlock if the participating tasks depend on one another
+        in a cycle. See <a href="https://go.dev/ref/mem#chan" target="_blank" rel="noopener noreferrer">Go's channel synchronization rules <span role="img" aria-label="opens in a new tab">↗</span></a>.
+      </p>
+      <p>
+        This pattern can simplify reasoning about an invariant, but it does not by itself persist
+        state across process loss. A durable broker and recovery design serve different responsibilities
+        from an in-process channel. Select the mechanism from the required lifetime and failure contract.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>A single owner can serialize state changes through messages.</li>
+        <li>Ownership and aliasing rules still matter when messages carry references.</li>
+        <li>Channels need bounded capacity and lifecycle policies; they are not automatically durable queues.</li>
+      </ul></div>
+
+      <h2>Bound concurrency and own task lifetimes</h2>
+      <p>
+        Cheap tasks make it easy to create more pending work than the system can finish. Each
+        waiting request or task may retain inputs, buffers, timers, stack or continuation state,
+        database demand and eventual response data. A million lightweight tasks can still exhaust
+        memory or overload a dependency.
+      </p>
+      <p>
+        Use limits matched to the scarce resource: bounded worker pools, semaphores, connection
+        budgets, request admission or bounded queues. Decide whether callers wait, receive a rejection
+        or submit durable deferred work. A task-count limit and a queue-length limit address different
+        parts of the backlog.
+      </p>
+      <p>
+        Define who waits for child tasks, observes their failures and requests cancellation. Request
+        completion or disconnection should have a deliberate effect on spawned work; detached tasks
+        do not become reliable background jobs automatically. An owned task group or equivalent
+        structured lifetime can make cleanup and error propagation easier to reason about.
+      </p>
+      <p>
+        Cancellation is generally cooperative. A deadline does not forcibly interrupt every native
+        call or stop already-committed external effects. Close owned resources, propagate supported
+        cancellation signals, and wait for work to settle according to the policy. Unobserved failures
+        and tasks abandoned forever are resource problems as well as correctness problems.
+      </p>
+      <p>
+        The same principles apply across threads, async tasks and goroutines. See
+        <a href="15-graceful-shutdown.html">shutdown and cancellation</a> and
+        <a href="17-scaling-performance.html">queueing, headroom and downstream capacity</a>.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Limit pending work as well as active execution and downstream connections.</li>
+        <li>Give child tasks an owner for completion, error handling and cancellation.</li>
+        <li>A timeout or cancelled task does not automatically undo external effects.</li>
+      </ul></div>
+
+      <h2>Choose and verify the execution model</h2>
+      <p>
+        Start by separating useful computation from waiting, then identify the resource limiting
+        progress. Use a model supported by the actual runtime, drivers and operational environment.
+        Thread pools, event loops and runtime-managed tasks can coexist in one backend.
+      </p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Observed problem</th><th>Evidence to inspect</th><th>Candidate response</th></tr></thead>
+        <tbody>
+          <tr><td>Many requests waiting for independent I/O</td><td>Dependency latency, pool waits and pending-task memory.</td><td>Suitable nonblocking I/O or bounded blocking/lightweight workers.</td></tr>
+          <tr><td>One long callback delays unrelated work</td><td>Event-loop delay and CPU profiles.</td><td>Reduce work, bound inputs, partition it fairly or offload computation.</td></tr>
+          <tr><td>CPU capacity is saturated</td><td>Profiles, runnable queues, core usage and synchronization costs.</td><td>Optimize computation or use suitable bounded parallel capacity.</td></tr>
+          <tr><td>Incorrect results depend on timing</td><td>Shared-state access, suspension points and controlled interleavings.</td><td>Fix ownership, atomicity or synchronization at the right scope.</td></tr>
+          <tr><td>Backlog grows faster than completions</td><td>Queue age, throughput, memory and downstream limits.</td><td>Control admission and capacity rather than merely spawning more tasks.</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        Test correctness separately from performance. Force relevant interleavings with controlled
+        barriers or mock operations, assert invariants and exercise failure and cancellation paths.
+        Repeatedly adding sleeps until a test passes only hides timing assumptions.
+      </p>
+      <p>
+        Race detectors can help find supported shared-memory data races in executed paths. Go's
+        <a href="https://go.dev/doc/articles/race_detector" target="_blank" rel="noopener noreferrer">race detector <span role="img" aria-label="opens in a new tab">↗</span></a> is one example, but a clean
+        run is not proof that every schedule or logical workflow is safe. The single-threaded async
+        check-then-act race still needs a business-invariant test.
+      </p>
+      <p>
+        Measure latency distributions, completed throughput, memory and resource pressure under
+        representative load. Profiles explain CPU work and appropriate traces or wait measurements
+        explain elapsed blocking. Concurrency organizes overlapping progress; parallelism supplies
+        simultaneous execution when useful. The combination should satisfy the workload's correctness
+        and capacity requirements rather than maximize a thread or task count.
+      </p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul>
+        <li>Choose mechanisms from measured computation, waiting and runtime behavior.</li>
+        <li>Use controlled correctness tests and appropriate race tooling without treating them as complete proofs.</li>
+        <li>Compare useful throughput, latency, memory and failure behavior at realistic load.</li>
+      </ul></div>
+    </div>
+
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; a study guide for curious engineers.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+
+</div>
+
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</dialog>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>
