@@ -160,6 +160,14 @@
       blurb: 'Understand CPU and I/O progress, runtime scheduling and safe coordination of overlapping work.',
       outcomes: ['Distinguish concurrency, parallelism, CPU execution and I/O waiting in request timelines.', 'Explain native threads, event loops, async/await and Go scheduling without confusing tasks with execution resources.', 'Recognize shared-state and async races, choose appropriate coordination and bound task lifetimes and resource demand.'],
       tags: ['concurrency', 'parallelism', 'CPU-bound', 'I/O-bound', 'blocking', 'nonblocking', 'processes', 'threads', 'shared memory', 'stack', 'heap', 'registers', 'scheduler', 'preemption', 'runnable', 'context switching', 'thread pool', 'event loop', 'epoll', 'kqueue', 'IOCP', 'libuv', 'Node.js', 'worker_threads', 'async', 'await', 'Promise', 'microtasks', 'callbacks', 'state machine', 'Promise.all', 'asyncio', 'WSGI', 'ASGI', 'Python workers', 'Python GIL', 'Rust futures', 'waker', 'Java virtual threads', 'goroutines', 'Go scheduler', 'GOMAXPROCS', 'GMP', 'net/http', 'race condition', 'data race', 'lost update', 'check then act', 'mutex', 'lock', 'atomic operation', 'transaction isolation', 'channels', 'message passing', 'ownership', 'semaphore', 'backpressure', 'cancellation', 'structured concurrency', 'race detector', 'OSTEP']
+    },
+    {
+      num: '20',
+      slug: '20-object-storage',
+      title: 'Object Storage & File Uploads',
+      blurb: 'Design durable file storage, direct uploads and safe publication across your database and bucket.',
+      outcomes: ['Compare block, file and object storage and explain keys, prefixes, durability and consistency.', 'Design authorized streaming or direct uploads with enforced constraints and verified publication.', 'Handle abandoned uploads, CORS, multipart transfers, private downloads and storage costs.'],
+      tags: ['object storage', 'file uploads', 'S3', 'bucket', 'key', 'prefix', 'block storage', 'file storage', 'ephemeral', 'persistent volume', 'metadata', 'erasure coding', 'Reed Solomon', 'durability', 'availability', 'versioning', 'backup', 'consistency', 'conditional writes', 'If-Match', 'If-None-Match', 'ETag', 'S3 compatible', 'streaming', 'backpressure', 'presigned URL', 'SigV4', 'POST policy', 'content-length-range', 'upload intent', 'HeadObject', 'quarantine', 'validation', 'publication', 'reconciliation', 'lifecycle', 'CORS', 'multipart upload', 'resumable upload', 'range request', 'CDN', 'egress', 'cost']
     }
   ];
 

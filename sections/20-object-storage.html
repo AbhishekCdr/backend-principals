@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Object Storage &amp; File Uploads &middot; Backend Principles</title>
+<meta name="description" content="Object storage and safe file uploads: buckets, keys, durability, consistency, conditional writes, streaming, presigned requests, upload validation, reconciliation, CORS, multipart uploads and delivery costs.">
+<script>
+  (function () {
+    var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    try {
+      var saved = localStorage.getItem('bp-theme');
+      if (saved === 'light' || saved === 'dark') theme = saved;
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="../assets/css/main.css">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="../index.html">
+    <span class="brand-mark">bp</span>
+    <span class="brand-text">Backend Principles <span>/ study guide</span></span>
+  </a>
+  <div class="topbar-spacer"></div>
+  <div class="topbar-crumb" id="crumb"></div>
+  <button class="search-btn js-open-palette" aria-label="Search notes">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span class="search-label">Search</span>
+    <span class="kbd">&#8984;K</span>
+  </button>
+  <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"></button>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="shell">
+
+  <details class="sidebar" id="sidebar" open>
+    <summary>Lessons</summary>
+    <nav aria-label="Lessons">
+      <ul class="nav-list" id="nav-list"></ul>
+      <p class="sidebar-note">Learning something new? Read the full notes. Reviewing? Switch to <strong>Quick revision</strong>.</p>
+    </nav>
+  </details>
+
+  <details class="toc" open>
+    <summary>On this page</summary>
+    <nav aria-label="On this page">
+      <ul id="toc-list"></ul>
+    </nav>
+  </details>
+
+  <main class="main" id="main-content" tabindex="-1">
+    <header class="lesson-head">
+      <p class="eyebrow">Lesson 20</p>
+      <h1>Object Storage &amp; File Uploads</h1>
+      <p class="lead">Store user files independently of application instances. Follow the bytes from <strong>authorized upload intent to validated publication, reliable delivery and recovery</strong>.</p>
+    </header>
+
+    <div class="prose">
+      <h2>Why instance-local uploads become a problem</h2>
+      <p>A profile-picture endpoint can receive multipart form data, save a file and record its path in a database. This can work on a persistent single-server installation. The trouble begins when that path is treated as durable, shared storage even though it belongs to one replaceable application instance.</p>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Failure</th><th>What causes it</th><th>Required property</th></tr></thead><tbody>
+          <tr><td>Upload exhausts memory</td><td>The parser or application buffers a large body, possibly with extra copies.</td><td>Enforced limits, bounded concurrency and streaming or direct uploads.</td></tr>
+          <tr><td>Files disappear after deployment</td><td>The old container and its writable layer are removed.</td><td>Storage whose lifetime is independent of the application instance.</td></tr>
+          <tr><td>Intermittent missing images</td><td>An upload reaches A; a later download reaches B, which has a different local disk.</td><td>A shared storage authority accessible by all authorized instances.</td></tr>
+          <tr><td>A disk failure loses data</td><td>The failed disk held the only recoverable copy.</td><td>Redundancy, integrity checks, repair and a recovery plan.</td></tr>
+          <tr><td>Database and files disagree</td><td>One write succeeds and the other fails.</td><td>A recoverable workflow across the two systems.</td></tr>
+        </tbody></table></div>
+      <p>A Docker container's writable layer is lost when that container is removed, not necessarily when the same container is stopped and restarted. Replacement during deployment is the common hazard. Volumes can persist independently and shared filesystems can serve multiple instances; neither is inherently the wrong choice. See <a href="https://docs.docker.com/engine/storage/" target="_blank" rel="noopener noreferrer">Docker's storage model <span role="img" aria-label="opens in a new tab">↗</span></a>.</p>
+      <p>If a file exists on only one of three equally likely instances, a random request succeeds about one-third of the time and fails about two-thirds. Real results depend on routing and placement. This is the same <a href="18-distributed-scaling.html">external-state requirement</a> discussed in horizontal scaling.</p>
+      <figure class="concept-diagram">
+        <div class="diagram-scroll" role="region" aria-label="A local path is not shared storage diagram" tabindex="0">
+          <svg viewBox="0 0 700 375" role="img" aria-labelledby="storage-local-title storage-local-desc">
+            <title id="storage-local-title">A local path is not shared storage</title>
+            <desc id="storage-local-desc">An upload is routed to instance A, which stores the file locally. A later download reaches instance B, which does not have that file.</desc>
+            <defs><marker id="storage-local-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+            <rect x="220" y="25" width="260" height="44" rx="8" class=""/><text x="350.0" y="52" class="center">Browser: upload avatar</text><path d="M350 69 L350 100" class="connector" marker-end="url(#storage-local-arrow)"/><rect x="220" y="105" width="260" height="44" rx="8" class=""/><text x="350.0" y="132" class="center">Load balancer</text><path d="M220 127 L140 200" class="connector" marker-end="url(#storage-local-arrow)"/><path d="M480 127 L560 200" class="connector" marker-end="url(#storage-local-arrow)"/><rect x="25" y="205" width="240" height="44" rx="8" class="active"/><text x="145.0" y="232" class="center">Instance A: file exists</text><rect x="435" y="205" width="240" height="44" rx="8" class="waiting"/><text x="555.0" y="232" class="center">Instance B: file absent</text><text x="50" y="295" class="">Upload routed to A</text><text x="445" y="295" class="">Later GET routed to B</text><text x="95" y="345" class="">A database path does not make A’s local disk accessible to B.</text>
+          </svg>
+        </div>
+        <figcaption><strong>A local path is not shared storage.</strong> All instances need authorized access to the same durable storage authority; a local pathname is insufficient.</figcaption>
+      </figure>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Local storage can be valid, but its lifetime and sharing must match the deployment.</li><li>Container removal, instance replacement and memory exhaustion are different failures.</li><li>Separate durable user bytes from replaceable application compute.</li></ul></div>
+
+      <h2>Block, file and object storage</h2>
+      <p>These are interfaces with different semantics, rather than a simple ranking from slow to fast. A filesystem commonly sits on a block device. An object service also ultimately stores data on physical devices, but exposes a different interface to your application.</p>
+      <div class="table-wrap"><table class="table"><thead><tr><th>Interface</th><th>What you address</th><th>Typical operations and use</th></tr></thead><tbody>
+        <tr><td>Block storage</td><td>Numbered blocks on a device or volume.</td><td>Read/write block ranges; a foundation for filesystems and database storage. Examples: an SSD or EBS volume.</td></tr>
+        <tr><td>File storage</td><td>Files through paths and directories.</td><td>Open, read, seek, write, rename and permission operations, with filesystem-specific guarantees. Local filesystems and NFS offer different deployment properties.</td></tr>
+        <tr><td>Object storage</td><td>An object key within a bucket.</td><td>Upload, retrieve, inspect metadata, list and delete through service APIs. Well suited to media, exports, archives and backups.</td></tr>
+      </tbody></table></div>
+      <p>Block sizes, latency and attachment rules depend on the system. Block devices are not universally restricted to one machine: <a href="https://docs.aws.amazon.com/ebs/latest/userguide/working-with-multi-attach.html" target="_blank" rel="noopener noreferrer">EBS Multi-Attach <span role="img" aria-label="opens in a new tab">↗</span></a> exists, but safe concurrent access needs suitable coordination. Storage growth also does not always require downtime; <a href="https://docs.aws.amazon.com/ebs/latest/userguide/ebs-modify-volume.html" target="_blank" rel="noopener noreferrer">Elastic Volumes <span role="img" aria-label="opens in a new tab">↗</span></a> supports online changes under documented conditions.</p>
+      <p>Filesystems provide useful coordination semantics, but they do not make every multi-write edit atomic. An application can write a replacement temporary file and rename it under appropriate filesystem rules; crash durability can require additional synchronization. Do not assume every editor implements the same save algorithm or that network filesystems have identical behavior.</p>
+      <figure class="concept-diagram">
+        <div class="diagram-scroll" role="region" aria-label="Three storage interfaces diagram" tabindex="0">
+          <svg viewBox="0 0 700 300" role="img" aria-labelledby="storage-types-title storage-types-desc">
+            <title id="storage-types-title">Three storage interfaces</title>
+            <desc id="storage-types-desc">Block storage addresses numbered ranges, file storage addresses files by path, and object storage addresses objects by bucket and key. These are interface comparisons, not a latency ranking.</desc>
+            <defs><marker id="storage-types-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+            <rect x="25" y="45" width="190" height="44" rx="8" class=""/><text x="120.0" y="72" class="center">Block storage</text><rect x="255" y="45" width="190" height="44" rx="8" class=""/><text x="350.0" y="72" class="center">File storage</text><rect x="485" y="45" width="190" height="44" rx="8" class=""/><text x="580.0" y="72" class="center">Object storage</text><text x="45" y="130" class="">Address: block number</text><text x="275" y="130" class="">Address: path</text><text x="505" y="130" class="">Address: bucket + key</text><rect x="25" y="165" width="190" height="44" rx="8" class="active"/><text x="120.0" y="192" class="center">Read/write ranges</text><rect x="255" y="165" width="190" height="44" rx="8" class="active"/><text x="350.0" y="192" class="center">Open / seek / rename</text><rect x="485" y="165" width="190" height="44" rx="8" class="active"/><text x="580.0" y="192" class="center">PUT / GET / DELETE</text><text x="55" y="265" class="">Device-level interface</text><text x="265" y="265" class="">Filesystem interface</text><text x="495" y="265" class="">Service API interface</text>
+          </svg>
+        </div>
+        <figcaption><strong>Three storage interfaces.</strong> A filesystem can sit on block storage. An object service also uses physical storage internally, while presenting a different API to callers.</figcaption>
+      </figure>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Block addresses device ranges, file storage addresses paths, and object storage addresses keys.</li><li>Choose the interface from access, sharing, durability and consistency requirements.</li><li>Latency, online resizing and multi-machine access are implementation-dependent.</li></ul></div>
+
+      <h2>What an object and a bucket contain</h2>
+      <p>An object combines a key, a sequence of bytes and metadata. System metadata describes properties such as size, modification time, content type and ETag. User metadata can record application values, but client-provided metadata is not proof of identity or authorization.</p>
+      <div class="msg"><div class="msg-head">Conceptual stored object</div><pre><code>Bucket: application-media
+Key:    tenants/t_42/users/u_7/avatars/9b71c2.png
+Bytes:  the uploaded image contents
+System metadata: size, content type, ETag, modification time
+Application record: owner, original filename, status, key, version ID</code></pre></div>
+      <p>A bucket is a named service container and a policy/configuration boundary. Keys identify objects within that bucket; versioning can retain multiple versions under one key. Bucket-name uniqueness rules depend on provider, bucket type and namespace. For ordinary S3 global-namespace buckets, uniqueness is across accounts and Regions within an AWS partition, rather than across every cloud platform. Check <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html" target="_blank" rel="noopener noreferrer">the relevant bucket naming rules <span role="img" aria-label="opens in a new tab">↗</span></a>.</p>
+      <p>Store a stable bucket/key reference, and a version identifier when required, in the database. A short-lived signed URL is a delivery credential, not the permanent identity of a file. Keep original display filenames separate from storage identity.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>An object is bytes plus a key and metadata within a bucket.</li><li>Store stable object references, ownership and state in the application database.</li><li>Metadata and filenames supplied by clients remain untrusted input.</li></ul></div>
+
+      <h2>Prefixes look like folders</h2>
+      <p>In a general purpose S3 bucket, <code>uploads/2026/cat.png</code> is one complete key. The slashes do not create a chain of filesystem directories. A listing can group matching names by prefix and delimiter, which produces the folder-like view in storage consoles.</p>
+      <div class="msg"><div class="msg-head">Conceptual prefix listing, not a filesystem traversal</div><pre><code>Stored keys:
+  uploads/2026/cat.png
+  uploads/2026/dog.png
+  uploads/readme.txt
+
+List with prefix "uploads/" and delimiter "/":
+  Contents:       uploads/readme.txt
+  CommonPrefixes: uploads/2026/</code></pre></div>
+      <p>A zero-byte object named <code>uploads/empty/</code> can act as a folder marker; it is still an object. Moving a prefix in a general purpose bucket generally requires copying and deleting its individual objects. It is not one atomic directory operation, and it has request, storage and possibly transfer costs. See <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-prefixes.html" target="_blank" rel="noopener noreferrer">prefix and delimiter semantics <span role="img" aria-label="opens in a new tab">↗</span></a>.</p>
+      <p>Scope these rules to the service being used. S3 directory buckets have additional semantics, including a <a href="https://docs.aws.amazon.com/AmazonS3/latest/API/API_RenameObject.html" target="_blank" rel="noopener noreferrer">RenameObject operation for S3 Express One Zone <span role="img" aria-label="opens in a new tab">↗</span></a>. “Object stores can never rename” is therefore too broad.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>General purpose bucket folders are commonly prefix groupings of flat keys.</li><li>Folder moves can involve many independent object operations.</li><li>Specialized bucket types and providers may expose additional operations.</li></ul></div>
+
+      <h2>Design keys and ownership deliberately</h2>
+      <p>Generate storage keys on the server from validated identifiers and a collision-resistant object ID. Preserve the user's original filename for display or a safely constructed download filename. Reusing an untrusted filename as a shared key can cause collisions, confusing Unicode handling and dangerous behavior if a later component interprets it as a local path.</p>
+      <p>Object keys are not inherently filesystem paths, so <code>../</code> does not by itself traverse S3 directories. The risk appears when proxies, URL normalization or local extraction apply path semantics. Avoid ambiguous components and do not concatenate arbitrary client paths into storage or filesystem locations.</p>
+      <p>An ownership prefix can help scope IAM permissions, but the server must derive its tenant and user IDs from trusted context. A string prefix check alone does not prove access: respect separator boundaries, ownership changes and the actual authorization policy. Opaque keys are not secrets or permission checks.</p>
+      <p>Do not present random leading prefixes as a universal S3 requirement. Modern S3 supports sequential naming and automatic scaling. At high rates, measure workload distribution, handle transient throttling with bounded retries and consult <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance-design-patterns.html" target="_blank" rel="noopener noreferrer">current performance guidance <span role="img" aria-label="opens in a new tab">↗</span></a>. A timestamp prefix is not automatically a design bug.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Separate server-generated identity from the original display filename.</li><li>Derive ownership from authenticated context; enforce it independently of key secrecy.</li><li>Choose partitioning strategies from current provider behavior and measured demand.</li></ul></div>
+
+      <h2>Metadata and data have different responsibilities</h2>
+      <p>A useful conceptual design separates an index of object identity and metadata from storage of the bytes. A lookup maps a key to the information needed to retrieve its data. The data side manages capacity, placement, redundancy, integrity checking and repair. Both need substantial engineering.</p>
+      <p>This is a mental model, not a description of S3's private implementation. Do not assume its metadata is one globally distributed B-tree or that a fixed number of frontends, shards or drives serves every object. Internal placement and algorithms can change without changing the public API.</p>
+      <figure class="concept-diagram">
+        <div class="diagram-scroll" role="region" aria-label="Lookup and byte storage have different jobs diagram" tabindex="0">
+          <svg viewBox="0 0 700 390" role="img" aria-labelledby="storage-planes-title storage-planes-desc">
+            <title id="storage-planes-title">Lookup and byte storage have different jobs</title>
+            <desc id="storage-planes-desc">A request is authenticated and routed. The conceptual metadata side tracks identity and lookup information; the data side stores bytes with redundancy and repair.</desc>
+            <defs><marker id="storage-planes-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+            <rect x="210" y="25" width="280" height="44" rx="8" class=""/><text x="350.0" y="52" class="center">Request: bucket + object key</text><path d="M350 69 L350 105" class="connector" marker-end="url(#storage-planes-arrow)"/><rect x="210" y="110" width="280" height="44" rx="8" class=""/><text x="350.0" y="137" class="center">Authenticate and route</text><path d="M210 132 L160 210" class="connector" marker-end="url(#storage-planes-arrow)"/><path d="M490 132 L540 210" class="connector" marker-end="url(#storage-planes-arrow)"/><rect x="25" y="215" width="280" height="44" rx="8" class="active"/><text x="165.0" y="242" class="center">Metadata / lookup</text><rect x="395" y="215" width="280" height="44" rx="8" class="active"/><text x="535.0" y="242" class="center">Object bytes / redundancy</text><text x="45" y="300" class="">Identity, size, validators, location</text><text x="420" y="300" class="">Placement, checksums, repair</text><text x="70" y="355" class="">Conceptual separation; not a specification of S3 internals.</text>
+          </svg>
+        </div>
+        <figcaption><strong>Lookup and byte storage have different jobs.</strong> The public API is the contract. Exact indexing, placement and coding algorithms are provider implementation details.</figcaption>
+      </figure>
+      <p>Use the application database to answer product questions such as “which attachments may this user see?” with ownership, status and pagination. Fetch known objects by key. Bucket listing remains useful for inventory, reconciliation, administration and workloads that actually need listing; it is not forbidden on every request path. Avoid repeatedly scanning a large bucket to reconstruct application state.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Separate reasoning about object lookup from storage and recovery of bytes.</li><li>A conceptual architecture is not a guarantee of a provider's internal layout.</li><li>Keep the application's searchable file catalog and authorization in an appropriate database.</li></ul></div>
+
+      <h2>Replication and erasure coding</h2>
+      <p>Replication stores additional copies. Three full copies consume three times the logical data size before other overhead. Failure-domain placement matters: three drives sharing one power source do not provide the same resilience as independent failure domains.</p>
+      <p>Erasure coding stores data fragments plus redundant fragments computed from them. In an illustrative Reed–Solomon scheme with 14 data shards and 6 parity shards, any 14 valid shards can reconstruct the data. Losing up to six shards is tolerable under this model; one shard alone cannot recover the object.</p>
+      <figure class="concept-diagram">
+        <div class="diagram-scroll" role="region" aria-label="Recovering from redundant fragments diagram" tabindex="0">
+          <svg viewBox="0 0 700 360" role="img" aria-labelledby="storage-erasure-title storage-erasure-desc">
+            <title id="storage-erasure-title">Recovering from redundant fragments</title>
+            <desc id="storage-erasure-desc">Fourteen data fragments and six parity fragments make twenty total. Any fourteen valid fragments suffice to reconstruct the original in this illustrative code. One fragment does not suffice.</desc>
+            <defs><marker id="storage-erasure-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+            <text x="25" y="30" class="">ILLUSTRATIVE 14 DATA + 6 PARITY CODE</text><rect x="25" y="60" width="56" height="44" rx="8" class="active"/><text x="53.0" y="87" class="center">D1</text><rect x="91" y="60" width="56" height="44" rx="8" class="active"/><text x="119.0" y="87" class="center">D2</text><rect x="157" y="60" width="56" height="44" rx="8" class="active"/><text x="185.0" y="87" class="center">D3</text><rect x="223" y="60" width="56" height="44" rx="8" class="active"/><text x="251.0" y="87" class="center">D4</text><rect x="289" y="60" width="56" height="44" rx="8" class="active"/><text x="317.0" y="87" class="center">D5</text><rect x="355" y="60" width="56" height="44" rx="8" class="active"/><text x="383.0" y="87" class="center">D6</text><rect x="421" y="60" width="56" height="44" rx="8" class="active"/><text x="449.0" y="87" class="center">D7</text><rect x="487" y="60" width="56" height="44" rx="8" class="active"/><text x="515.0" y="87" class="center">D8</text><rect x="553" y="60" width="56" height="44" rx="8" class="active"/><text x="581.0" y="87" class="center">D9</text><rect x="619" y="60" width="56" height="44" rx="8" class="active"/><text x="647.0" y="87" class="center">D10</text><rect x="25" y="124" width="56" height="44" rx="8" class="active"/><text x="53.0" y="151" class="center">D11</text><rect x="91" y="124" width="56" height="44" rx="8" class="active"/><text x="119.0" y="151" class="center">D12</text><rect x="157" y="124" width="56" height="44" rx="8" class="active"/><text x="185.0" y="151" class="center">D13</text><rect x="223" y="124" width="56" height="44" rx="8" class="active"/><text x="251.0" y="151" class="center">D14</text><rect x="289" y="124" width="56" height="44" rx="8" class="waiting"/><text x="317.0" y="151" class="center">P1</text><rect x="355" y="124" width="56" height="44" rx="8" class="waiting"/><text x="383.0" y="151" class="center">P2</text><rect x="421" y="124" width="56" height="44" rx="8" class="waiting"/><text x="449.0" y="151" class="center">P3</text><rect x="487" y="124" width="56" height="44" rx="8" class="waiting"/><text x="515.0" y="151" class="center">P4</text><rect x="553" y="124" width="56" height="44" rx="8" class="waiting"/><text x="581.0" y="151" class="center">P5</text><rect x="619" y="124" width="56" height="44" rx="8" class="waiting"/><text x="647.0" y="151" class="center">P6</text><path d="M350 168 L350 215" class="connector" marker-end="url(#storage-erasure-arrow)"/><rect x="125" y="220" width="450" height="44" rx="8" class="active"/><text x="350.0" y="247" class="center">Any 14 valid shards → reconstruct original bytes</text><text x="45" y="325" class="">20 / 14 ≈ 1.43× storage; up to 6 missing shards tolerated.</text>
+          </svg>
+        </div>
+        <figcaption><strong>Recovering from redundant fragments.</strong> This arithmetic explains the idea of erasure coding, not an advertised S3 fragment layout or a standalone durability calculation.</figcaption>
+      </figure>
+      <div class="msg"><div class="msg-head">Illustrative capacity arithmetic, not an S3 layout specification</div><pre><code>Three replicas:       stored / logical = 3.00×  (200% extra)
+14 data + 6 parity:   stored / logical = 20 / 14 ≈ 1.43×
+Extra coding capacity:                 6 / 14 ≈ 42.9%</code></pre></div>
+      <p>Encoding, recovery reads, network traffic, small-object overhead and repair speed affect the real tradeoff. A larger count of tolerated fragment losses does not alone prove higher durability than another design; failure correlations and recovery time matter. Provider durability claims cannot be derived from this example without their full reliability model.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Redundancy needs independent failure domains and working repair mechanisms.</li><li>In the illustrative 14+6 code, any 14 valid shards recover the object.</li><li>Capacity efficiency and durability are related but not interchangeable measurements.</li></ul></div>
+
+      <h2>Durability, availability and recoverability</h2>
+      <p>Availability concerns whether an authorized operation can succeed when needed. Durability concerns retaining data over time despite failures. Recoverability concerns restoring the intended state after mistakes, compromise or corruption. Waiting may resolve a temporary outage; it does not restore a permanently lost object.</p>
+      <p>S3 Standard is designed for <strong>99.999999999% durability</strong>, eleven nines, and has a separate availability design target. These are service design metrics, not a promise that a particular object cannot be lost. With a simplified annual loss fraction of 10<sup>−11</sup>, ten million objects imply an expected 0.0001 losses per year, equivalent to one per 10,000 years on average under that model. This is not an independent-failure guarantee or a prediction of when a loss will occur. See <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-class-intro.html" target="_blank" rel="noopener noreferrer">storage-class durability and availability targets <span role="img" aria-label="opens in a new tab">↗</span></a>.</p>
+      <p>Durable storage also preserves an accidental overwrite. Enable versioning where recovery requirements justify it, protect permissions to delete versions, and test restores. Replication to another account can help isolate credentials, but is not automatically an independent backup if unwanted changes also propagate. Retention, deletion behavior and access boundaries need explicit policies.</p>
+      <p>In a versioning-enabled general purpose bucket, an ordinary delete generally creates a delete marker; deleting a specific version can permanently remove that version. Versions consume storage. See <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/Versioning.html" target="_blank" rel="noopener noreferrer">S3 Versioning <span role="img" aria-label="opens in a new tab">↗</span></a>.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Availability, durability and recovery from mistakes answer different questions.</li><li>Eleven nines is a design target, not a substitute for backups and restore testing.</li><li>Versioning helps only while recoverable versions remain protected and retained.</li></ul></div>
+
+      <h2>Consistency and whole-object operations</h2>
+      <p>For ordinary general purpose bucket usage, replacing an object means publishing a replacement value under its key, rather than editing arbitrary filesystem byte offsets. Readers should not receive half of one successful object replacement mixed with half of another. Range retrieval is supported; it is different from an in-place partial write.</p>
+      <p>S3 provides strong read-after-write consistency for object writes and deletes and strongly consistent listings. After a successful write, a subsequent authorized origin read observes that write or a later one. This does not guarantee every request returns 200: authorization, deletion, networking and other failures still exist. Nor does it make multi-object updates transactional or force CDN and browser caches to refresh. See <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html" target="_blank" rel="noopener noreferrer">the S3 consistency model <span role="img" aria-label="opens in a new tab">↗</span></a>.</p>
+      <p>Legacy advice to sleep after every successful S3 upload is not a remedy for modern origin consistency. Diagnose permission, key, cache or workflow errors instead. Other providers and cross-region replication can have different guarantees. Specialized APIs may add append or rename behavior; check the exact bucket and API contract rather than treating immutability as universal.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Whole-object replacement and partial retrieval are different operations.</li><li>Strong origin consistency does not refresh external caches or create a database transaction.</li><li>A successful write is not a guarantee that every later network request succeeds.</li></ul></div>
+
+      <h2>Conditional writes prevent unintended overwrites</h2>
+      <p>An unconditional write to an existing key can replace its current value. Concurrent writes can both succeed at different times even though only one value remains current. HTTP POST does not universally mean “always create a new entity,” and a method name alone does not provide collision protection.</p>
+      <div class="table-wrap"><table class="table"><thead><tr><th>Condition</th><th>Intent</th><th>What to handle</th></tr></thead><tbody>
+        <tr><td><code>If-None-Match: *</code></td><td>Create only if no current object exists under the relevant API's rules.</td><td>Existing object: precondition failure, commonly 412.</td></tr>
+        <tr><td><code>If-Match: "etag"</code></td><td>Replace only if the current object's ETag matches the observed ETag.</td><td>A changed ETag rejects a stale update; reread and resolve the conflict.</td></tr>
+      </tbody></table></div>
+      <p>If A reads ETag E1, B replaces that value with E2, then A's conditional replacement using E1 fails instead of overwriting B's change. ETags are opaque validators, not universally MD5 checksums or unique revision numbers. Recreating identical content can preserve a validator, so do not assume ETag comparison detects every intermediate change.</p>
+      <p>Handle documented conflicts and retry behavior, including concurrent delete cases. The successful condition applies to one object operation. It does not automatically provide a safe distributed lease, fencing token, leader election protocol or multi-object transaction. See <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html" target="_blank" rel="noopener noreferrer">S3 conditional write semantics <span role="img" aria-label="opens in a new tab">↗</span></a> and <a href="19-concurrency-parallelism.html">atomicity and race conditions</a>.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Use supported conditional writes when create-only or stale-write protection is required.</li><li>ETags are validators; do not treat them as universal checksums or revision counters.</li><li>A conditional object write is a coordination primitive, not a complete distributed lock design.</li></ul></div>
+
+      <h2>S3-compatible does not mean identical</h2>
+      <p>S3 compatibility usually means a service implements enough of the S3 API to work with familiar clients and SDKs. It does not promise every AWS feature, error case or guarantee. Avoid assuming that a provider supports a feature merely because the SDK exposes its method.</p>
+      <p>Check conditional operations, consistency, browser POST policies, checksums, multipart completion, versioning, encryption, lifecycle behavior, CORS and request limits against the actual provider's current documentation. Integration tests should exercise the features the application depends on. Do not copy a historical feature comparison as a permanent statement about a provider.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Compatibility is a feature-by-feature contract, not an identity guarantee.</li><li>Verify required semantics against the selected provider and bucket type.</li><li>Test important rejection and concurrency behavior as well as successful uploads.</li></ul></div>
+
+      <h2>Uploading through the application server</h2>
+      <p>A proxy upload sends bytes from browser to backend and then to storage. It can be a production-ready choice when centralized inspection, protocol mediation or other requirements justify it. The backend can authorize the request and apply validation before accepting the file into its published storage area.</p>
+      <p>Buffering an entire upload creates memory demand proportional to file size and concurrency. Twenty buffered 100 MB files already represent about 2 GB of bodies before parser copies, runtime overhead and other work. Multipart parsers differ: some buffer, some spool to disk, and some expose streaming APIs. Do not infer their behavior from a function's name.</p>
+      <p>Streaming with backpressure bounds buffering, but the SDK may buffer multiple multipart chunks or concurrent parts. Budget memory across the parser, SDK and all active uploads. Enforce body limits before expensive parsing, count actual received bytes even without Content-Length, limit concurrency, and clean up partial work after cancellation.</p>
+      <p>Also inspect reverse-proxy buffering, body limits, gateway payload caps and timeouts. An idle timeout measures inactivity, not necessarily total transfer duration. Increasing an application timeout cannot bypass a provider's hard payload limit. Streaming avoids whole-body buffering but still uses network capacity and connection state.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Proxy uploads are valid when the requirements justify their resource costs.</li><li>Use backpressure, early size limits and bounded concurrency across every buffering layer.</li><li>Check proxy and gateway limits separately from application behavior.</li></ul></div>
+
+      <h2>Direct uploads with presigned URLs</h2>
+      <p>For many applications, the backend can authorize an upload without relaying its bytes. It chooses the bucket and key, records the intent, and returns a short-lived signed capability. The browser then uploads directly to the storage endpoint while the bucket remains private.</p>
+      <figure class="concept-diagram">
+        <div class="diagram-scroll" role="region" aria-label="Separate upload authorization from byte transfer diagram" tabindex="0">
+          <svg viewBox="0 0 700 370" role="img" aria-labelledby="storage-direct-title storage-direct-desc">
+            <title id="storage-direct-title">Separate upload authorization from byte transfer</title>
+            <desc id="storage-direct-desc">The browser requests a grant from the application API and receives a signed capability. It then transfers the file bytes directly to private object storage.</desc>
+            <defs><marker id="storage-direct-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+            <text x="25" y="30" class="">CONTROL: authorization and upload intent</text><rect x="25" y="50" width="210" height="44" rx="8" class=""/><text x="130.0" y="77" class="center">Browser</text><path d="M235 72 L425 72" class="connector" marker-end="url(#storage-direct-arrow)"/><rect x="430" y="50" width="245" height="44" rx="8" class="active"/><text x="552.5" y="77" class="center">Application API</text><text x="265" y="60" class="">request grant</text><path d="M430 110 L240 110" class="connector" marker-end="url(#storage-direct-arrow)"/><text x="265" y="137" class="">signed capability</text><text x="25" y="205" class="">DATA: file bytes bypass application compute</text><rect x="25" y="230" width="210" height="44" rx="8" class=""/><text x="130.0" y="257" class="center">Browser</text><path d="M235 252 L425 252" class="connector" marker-end="url(#storage-direct-arrow)"/><rect x="430" y="230" width="245" height="44" rx="8" class="active"/><text x="552.5" y="257" class="center">Private object storage</text><text x="260" y="240" class="">PUT or POST bytes</text><text x="50" y="330" class="">The grant authorizes a request; it does not validate the file’s contents.</text>
+          </svg>
+        </div>
+        <figcaption><strong>Separate upload authorization from byte transfer.</strong> The bucket stays private. The signed URL or POST fields convey limited authority and must be protected.</figcaption>
+      </figure>
+      <p>A SigV4 presigned URL binds request details such as the method, key, expiry and signed headers through a signature derived from the signer's credentials. Use the provider SDK to construct it. The browser receives credential-identifying fields, a signature and sometimes a session token, but not the signing secret. Changing signed request details causes authorization to fail.</p>
+      <p><strong>The URL itself is a bearer capability.</strong> Anyone possessing it can attempt the permitted operation. It can normally be reused until expiry, subject to credential expiry and policy changes; it is not a single-use link. Expiry is checked when a request begins, so an already-started transfer may continue afterward. Keep lifetimes short and keep URLs out of logs, analytics and unnecessary sharing. See <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html" target="_blank" rel="noopener noreferrer">presigned URL permissions and expiration <span role="img" aria-label="opens in a new tab">↗</span></a>.</p>
+      <p>Authorize issuance, choose keys server-side and scope the signer to the required actions. Signing a content-type header restricts the supplied label, not the actual byte format. Direct uploads move validation and publication into a later workflow; they do not remove those responsibilities.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>The backend grants scoped upload authority; the browser transfers bytes directly.</li><li>Protect signed URLs as reusable bearer credentials until they expire or become invalid.</li><li>Authorization and content validation remain application responsibilities.</li></ul></div>
+
+      <h2>Enforcing upload policy and size</h2>
+      <p>A presigned PUT without an enforced size constraint should not be treated as a bounded avatar upload. Depending on the client and provider, signed request headers can constrain aspects of the upload, but browsers do not let JavaScript freely set Content-Length. For S3 browser uploads requiring an explicit accepted size range, a presigned POST policy is a useful option.</p>
+      <div class="msg"><div class="msg-head">Illustrative policy conditions; the SDK supplies signature fields and expiry</div><pre><code>[
+  ["content-length-range", 1024, 5242880],
+  ["starts-with", "$Content-Type", "image/"],
+  {"key": "tenants/t_42/users/u_7/avatars/server-generated-id"}
+]</code></pre></div>
+      <p>The range here is 1 KiB to 5 MiB. Prefer an exact server-generated key when one upload should target one object; a prefix policy grants broader authority. The client sends the returned form fields and file to the returned URL. Matching field values and policy conditions must both be provided as required by the SDK. See <a href="https://docs.aws.amazon.com/boto3/latest/reference/services/s3/client/generate_presigned_post.html" target="_blank" rel="noopener noreferrer">presigned POST fields and conditions <span role="img" aria-label="opens in a new tab">↗</span></a>.</p>
+      <div class="msg"><div class="msg-head">Browser helper using server-issued POST fields</div><pre><code>async function uploadWithPost(file, grant) {
+  const form = new FormData();
+  for (const [name, value] of Object.entries(grant.fields)) {
+    form.append(name, value);
+  }
+  form.append("file", file);
+  const response = await fetch(grant.url, {
+    method: "POST",
+    body: form
+  });
+  if (!response.ok) throw new Error(`Upload failed: ${response.status}`);
+}</code></pre></div>
+      <p>Append the file after the policy fields. Let the browser set the outer multipart Content-Type and boundary. The form's object Content-Type field is separate from that outer header. A matching image label does not prove the body is an image; inspect the bytes before publishing. Exact error codes can vary by the violated condition and provider.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Enforce size and destination at the storage boundary where supported.</li><li>POST policy fields and conditions must agree; prefer one exact key for one upload intent.</li><li>Client labels and client-side checks do not validate the actual file contents.</li></ul></div>
+
+      <h2>Upload intent, verification and publication</h2>
+      <p>There is no automatic transaction covering both the application database and object storage. Model the upload as a stateful workflow with retries and reconciliation. The application should expose only objects that have passed its publication requirements.</p>
+      <ol class="flow">
+        <li><span class="flow-title">Create an intent</span><p>Authenticate and authorize the caller. Reserve quota, generate a unique key, and persist an upload ID, owner, expected constraints, expiry and pending state before issuing the grant.</p></li>
+        <li><span class="flow-title">Transfer the bytes</span><p>The browser uploads directly to private staging storage. A failed transfer can be retried under the grant's rules.</p></li>
+        <li><span class="flow-title">Verify completion</span><p>The client sends the application upload ID. The server loads the owned record and verifies the expected object, rather than accepting an arbitrary client-supplied key.</p></li>
+        <li><span class="flow-title">Validate and publish</span><p>Inspect required properties and content, then atomically update the database state and profile reference. Repeated completion calls should return a consistent result.</p></li>
+      </ol>
+      <figure class="concept-diagram">
+        <div class="diagram-scroll" role="region" aria-label="Upload lifecycle across two systems diagram" tabindex="0">
+          <svg viewBox="0 0 700 355" role="img" aria-labelledby="storage-states-title storage-states-desc">
+            <title id="storage-states-title">Upload lifecycle across two systems</title>
+            <desc id="storage-states-desc">An application intent becomes a private upload, then enters verification and reaches ready after validation. Abandoned or rejected work is cleaned up separately. Publication and expiration must coordinate.</desc>
+            <defs><marker id="storage-states-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+            <rect x="20" y="50" width="195" height="44" rx="8" class=""/><text x="117.5" y="77" class="center">Pending intent</text><path d="M215 72 L245 72" class="connector" marker-end="url(#storage-states-arrow)"/><rect x="250" y="50" width="195" height="44" rx="8" class=""/><text x="347.5" y="77" class="center">Private upload</text><path d="M445 72 L475 72" class="connector" marker-end="url(#storage-states-arrow)"/><rect x="480" y="50" width="200" height="44" rx="8" class="waiting"/><text x="580.0" y="77" class="center">Verifying</text><path d="M580 94 L580 175" class="connector" marker-end="url(#storage-states-arrow)"/><rect x="480" y="180" width="200" height="44" rx="8" class="active"/><text x="580.0" y="207" class="center">Ready / published</text><path d="M250 94 L115 175" class="connector" marker-end="url(#storage-states-arrow)"/><rect x="20" y="180" width="195" height="44" rx="8" class="waiting"/><text x="117.5" y="207" class="center">Expired / rejected</text><text x="265" y="200" class="">Cleanup staging only</text><text x="30" y="285" class="">Completion uses the owned upload ID, not an arbitrary key.</text><text x="30" y="320" class="">Publish the verified version; retry transitions idempotently.</text>
+          </svg>
+        </div>
+        <figcaption><strong>Upload lifecycle across two systems.</strong> The database and bucket do not commit together. State transitions, protected publication and reconciliation make partial failures recoverable.</figcaption>
+      </figure>
+      <p><a href="https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html" target="_blank" rel="noopener noreferrer">HeadObject <span role="img" aria-label="opens in a new tab">↗</span></a> returns metadata without downloading the body. It can check size and recorded validators, but cannot prove that a claimed image is decodable or malware-free. HEAD is a billable request under applicable pricing, not free. Missing objects can produce 403 or 404 depending on permissions; handle permissions and transient errors distinctly.</p>
+      <p>A still-valid upload grant can overwrite its staging key after verification. Avoid publishing a mutable, client-writable target based only on a previous HEAD. Where supported, pin verification and reads to a version ID; alternatively copy a specifically validated version or conditionally matched source to a new, server-controlled publication key. Protect that published key from upload grants.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Persist intent first, then verify and publish through an idempotent state transition.</li><li>HEAD checks metadata; content inspection is a separate operation.</li><li>Bind publication to the bytes actually validated, despite reusable upload capabilities.</li></ul></div>
+
+      <h2>Content inspection and safe downloads</h2>
+      <p>Keep unvalidated uploads private. Validate actual file structure with suitable parsers and resource limits, including decoded image dimensions, archive expansion, media duration or other format-specific risks. Malware scanning can be appropriate to the product. A checksum helps detect integrity problems; it does not make malicious content safe.</p>
+      <p>For avatars, decoding and re-encoding into an approved format can provide a clean publication artifact with bounded dimensions. Reject or separately handle active formats such as HTML and SVG according to the product's requirements. Do not let arbitrary uploaded markup execute under a trusted application origin.</p>
+      <p>For private downloads, authenticate and authorize access to a ready database record, then issue a short-lived signed GET or an appropriate CDN capability. Configure Content-Type, safe Content-Disposition filenames and caching behavior deliberately. Use separate content origins and avoid leaking private responses through shared caches. See <a href="16-security.html">trust boundaries and browser security</a>.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Validate bytes and resource usage before publishing content.</li><li>Integrity checks, format checks and malware checks serve different purposes.</li><li>Authorize downloads independently and choose safe origins, response headers and cache policies.</li></ul></div>
+
+      <h2>Abandoned uploads and reconciliation</h2>
+      <p>Clients close tabs, lose networks and retry. A file may exist even though its completion request never arrived; a pending row may exist without any stored object. Storage events can help trigger processing, but event-driven completion also needs duplicate handling, retries and reconciliation.</p>
+      <p>A cleanup worker claims expired intents using a state transition that cannot race with publication, then deletes their staging objects and releases reservations. Retain enough state to retry failed deletion. Reconcile stuck verification jobs and orphaned artifacts using the database catalog, inventory or bounded listings as appropriate.</p>
+      <p>Do not apply a blanket “delete after 24 hours” rule to a prefix that also contains published objects. Keep staging and published namespaces separate, or manage lifecycle tags safely. If objects remain at their original key, the cleanup rule must distinguish ready objects. Lifecycle expiration is asynchronous and is not an exact 24-hour timer.</p>
+      <p>Incomplete multipart uploads are a separate resource: abort them explicitly or configure an appropriate abort lifecycle rule. Deleting an application row alone does not clear their retained parts. Connect cleanup to <a href="10-background-jobs.html">durable job retries</a> and <a href="15-graceful-shutdown.html">task lifetime management</a>.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Plan for every combination of stored bytes, pending records and missing client callbacks.</li><li>Cleanup and publication must coordinate rather than race.</li><li>Separate staging lifecycle from published retention and incomplete multipart cleanup.</li></ul></div>
+
+      <h2>CORS for browser-to-storage requests</h2>
+      <p>Direct uploads commonly cross origins. Configure the bucket to allow the actual frontend origin, required upload methods and request headers. When browser JavaScript needs to read ETag or other non-safelisted response headers, expose those headers explicitly. Multipart clients often need the returned ETags to track parts.</p>
+      <p>CORS is browser access policy, not authentication. It does not stop curl or a leaked signed URL from attempting an authorized upload. A valid signature can still be unreadable to JavaScript because CORS is wrong, and successful CORS does not grant storage permissions. See <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html" target="_blank" rel="noopener noreferrer">S3's CORS evaluation <span role="img" aria-label="opens in a new tab">↗</span></a>.</p>
+      <p>If curl works and the browser fails, inspect preflight and upload responses separately: origin, requested method, requested headers, endpoint Region, redirects and exposed response headers. For POST, use the browser-generated multipart boundary. Do not make a private bucket public to solve a CORS error.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Allow the intended browser origin, methods and headers at the storage endpoint.</li><li>Expose ETag when the client must read it; CORS and authorization are separate.</li><li>Debug preflight and actual upload requests without weakening bucket access.</li></ul></div>
+
+      <h2>Large files, multipart uploads and resuming</h2>
+      <p>S3 multipart upload splits one object into independently uploaded parts, followed by a completion operation. This is different from a browser multipart/form-data POST. Retry failed parts instead of restarting the whole file, and bound parallel uploads so client memory, bandwidth and request costs remain controlled.</p>
+      <p>Persist the storage upload ID, part numbers and returned validators needed for completion, associated with the authorized application intent. Resuming also requires access to the original file and valid part grants; a browser tab does not magically retain a file handle after every restart. The backend must authorize signing, completion and abort against the same owned intent.</p>
+      <p>Only mark the application ready after storage completion and content verification. Use the SDK's error handling, checksum support and current part-size/count limits instead of assuming the final ETag is a whole-file MD5. Retained incomplete parts incur storage charges until completed or aborted. See <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html" target="_blank" rel="noopener noreferrer">multipart upload operations and cleanup <span role="img" aria-label="opens in a new tab">↗</span></a>.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Storage multipart upload supports independent part retries and controlled parallelism.</li><li>Resumption needs persistent upload state, original bytes and renewed authorization where necessary.</li><li>Complete or abort uploads and verify the resulting object before publication.</li></ul></div>
+
+      <h2>Downloads, range requests and delivery cost</h2>
+      <p>A 50 MB decimal file over a steady 2 Mbit/s connection takes about 200 seconds, or 3 minutes 20 seconds, before overhead. An async server need not dedicate an actively running CPU worker for that entire time, but it still retains connection state and consumes bandwidth. I/O is normal backend work; the decision is where to perform it economically.</p>
+      <p>Object storage and a CDN can deliver bytes while application servers focus on authorization and business logic. A range GET asks for a byte interval and can return 206 Partial Content with Content-Range. Media players use byte ranges along with container indexes and codec information to seek; range support alone is not video transcoding or adaptive streaming. An invalid range can produce 416. See <a href="https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html" target="_blank" rel="noopener noreferrer">GetObject range semantics <span role="img" aria-label="opens in a new tab">↗</span></a>.</p>
+      <p>Budget stored bytes, old versions, request counts, retained multipart parts, retrieval charges for selected classes, transfer/egress, replication and processing. HEAD, LIST and failed operations can have applicable charges too. Estimate from access patterns and the provider's <a href="https://aws.amazon.com/s3/pricing/" target="_blank" rel="noopener noreferrer">current pricing <span role="img" aria-label="opens in a new tab">↗</span></a>, rather than treating cheap storage as cheap delivery.</p>
+      <p>Measure upload completion and abandonment, verification latency, rejected sizes, orphan age, download latency, throttling, bytes transferred and cost. A complete design connects authorization, byte transfer, validation, publication, retention and recovery; a bucket alone is not the workflow.</p>
+      <div class="keytakeaways"><h4>Key takeaways</h4><ul><li>Long transfers occupy connections and bandwidth without necessarily occupying a CPU worker continuously.</li><li>Range requests retrieve byte intervals; media formats and delivery pipelines determine seeking behavior.</li><li>Evaluate total storage, request, processing and delivery costs and monitor the whole upload lifecycle.</li></ul></div>
+    </div>
+
+    <nav class="pager" id="pager"></nav>
+
+    <footer class="foot">
+      Backend Principles &mdash; a study guide for curious engineers.
+      &copy; <span id="year"></span>
+    </footer>
+  </main>
+
+
+</div>
+
+<dialog class="palette-backdrop" id="palette" aria-label="Search notes">
+  <div class="palette">
+    <div class="palette-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="palette-input" type="search" aria-label="Search lessons, sections and topics" placeholder="Search lessons, sections, topics&hellip;" autocomplete="off" spellcheck="false">
+      <button class="palette-close" id="palette-close" type="button" aria-label="Close search">Close</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-foot">
+      <span><span class="kbd">&uarr;</span><span class="kbd">&darr;</span> navigate</span>
+      <span><span class="kbd">&crarr;</span> open</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</dialog>
+
+<script src="../assets/js/app.js"></script>
+</body>
+</html>

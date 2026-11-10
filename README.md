@@ -27,6 +27,7 @@ The site itself has no framework, dependencies or build step.
 | 17 | [Scaling & Performance](sections/17-scaling-performance.html) | Latency distributions, percentiles, throughput, queueing, headroom, bottlenecks, profiling, tracing, N+1 queries, indexes, connection pools, PgBouncer, caching tradeoffs, vertical/horizontal scaling & capacity testing |
 | 18 | [Scaling & Performance II](sections/18-distributed-scaling.html) | Stateless instances, shared storage, load-balancing algorithms, health checks, replicas, consistency, partitioning, sharding, managed databases, CDNs, edge computing, durable jobs, microservices, autoscaling & serverless |
 | 19 | [Concurrency & Parallelism](sections/19-concurrency-parallelism.html) | CPU/I/O workloads, request timelines, processes, threads, scheduling, event loops, async/await, Promise coordination, runtime differences, Go goroutines, GOMAXPROCS, races, locks, atomic updates, ownership & task lifetimes |
+| 20 | [Object Storage & File Uploads](sections/20-object-storage.html) | Storage interfaces, buckets, keys, prefixes, durability, erasure coding, consistency, conditional writes, streaming, presigned uploads, POST policies, verification, safe publication, cleanup, CORS, multipart uploads, range requests & cost |
 
 ## Running it
 
@@ -67,8 +68,8 @@ Opening `index.html` directly from the filesystem also works.
 
    ```js
    {
-     num: '20',
-     slug: '20-your-topic',
+     num: '21',
+     slug: '21-your-topic',
      title: 'Your Next Topic',
      blurb: 'One sentence for the home page card.',
      outcomes: ['First learning goal.', 'Second learning goal.', 'Third learning goal.'],
@@ -128,7 +129,8 @@ navigation, 200% text/zoom and printing.
 │   ├── 16-security.html
 │   ├── 17-scaling-performance.html
 │   ├── 18-distributed-scaling.html
-│   └── 19-concurrency-parallelism.html
+│   ├── 19-concurrency-parallelism.html
+│   └── 20-object-storage.html
 ├── tests/revision.test.js          revision behavior and content coverage
 └── assets/
     ├── css/main.css                the whole design system
